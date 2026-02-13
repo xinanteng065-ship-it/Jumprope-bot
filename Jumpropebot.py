@@ -19,9 +19,9 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://visai-1.onrender.com")
+APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://yourapp.onrender.com")
 BOOTH_SUPPORT_URL = "https://yourapp.booth.pm/items/xxxxxxx"
-LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
+LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@xxxxxxxx")
 
 if not all([LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, OPENAI_API_KEY]):
     raise ValueError("🚨 必要な環境変数が設定されていません")
@@ -261,7 +261,7 @@ def get_users_for_delivery(target_time):
         today = datetime.now(JST).strftime("%Y-%m-%d")
 
         cursor.execute('''
-            SELECT user_id, level FROM users 
+            SELECT user_id, level, delivery_time FROM users 
             WHERE (last_delivery_date IS NULL OR last_delivery_date != ?)
         ''', (today,))
 
@@ -344,15 +344,20 @@ IJRU視点を明示的に意識させる課題を含める"""
 
     # ユーザー履歴の分析
     success_rate = 0
+    difficulty_rate = 0
+    
     if user_history['delivery_count'] > 0:
-        success_rate = user_history['success_count'] / max(user_history['delivery_count'], 1)
-        difficulty_rate = user_history['difficulty_count'] / max(user_history['delivery_count'], 1)
+        success_rate = user_history['success_count'] / user_history['delivery_count']
+        difficulty_rate = user_history['difficulty_count'] / user_history['delivery_count']
     
     adjustment = ""
-    if success_rate > 0.7:
-        adjustment = "ユーザーは好調。少し難度を上げてもOK。"
-    elif difficulty_rate > 0.5:
-        adjustment = "ユーザーは苦戦中。今日は軽めの課題にしてください。"
+    if user_history['delivery_count'] >= 3:  # 最低3回配信後から調整開始
+        if success_rate > 0.7:
+            adjustment = "ユーザーは好調です。少し難度を上げてチャレンジさせましょう。"
+        elif difficulty_rate > 0.5:
+            adjustment = "ユーザーは苦戦中です。今日は軽めで達成感を感じられる課題にしてください。"
+        elif success_rate > 0.4 and difficulty_rate < 0.3:
+            adjustment = "ユーザーは順調です。現在の難度を維持してください。"
 
     # プロンプト生成
     user_prompt = f"""今日の練習課題を1つ生成してください。
@@ -431,11 +436,11 @@ def send_challenge_to_user(user_id, level):
         print(f"📤 [{timestamp}] Sending challenge to {user_id[:8]}... (Level: {level})")
 
         challenge_content = create_challenge_message(user_id, level)
-        messages = [TextSendMessage(text=challenge_content)]
-
-        # フィードバック促進メッセージ
-        feedback_msg = "\n\n💬 フィードバック\n「できた」「難しかった」と送ると、次回の課題が調整されます！"
-        messages.append(TextSendMessage(text=feedback_msg))
+        
+        # フィードバック促進を課題に追加
+        full_message = challenge_content + "\n\n💬 フィードバック\n「できた」「難しかった」と送ると、次回の課題が調整されます！"
+        
+        messages = [TextSendMessage(text=full_message)]
 
         settings = get_user_settings(user_id)
         if settings['delivery_count'] >= 10 and settings['support_shown'] == 0:
@@ -488,6 +493,33 @@ def schedule_checker():
 
             last_checked_minute = current_minute_key
             print(f"\n⏰ [{timestamp}] Checking deliveries for {current_time_str}")
+
+            # デバッグ: 全ユーザーの設定を表示
+            try:
+                conn = get_db()
+                cursor = conn.cursor()
+                cursor.execute('SELECT user_id, delivery_time, level, last_delivery_date FROM users')
+                all_users = cursor.fetchall()
+                conn.close()
+
+                print(f"📊 Total registered users: {len(all_users)}")
+                for row in all_users:
+                    user_id = row['user_id']
+                    delivery_time = row['delivery_time'].strip()
+                    level = row['level']
+                    last_date = row['last_delivery_date']
+
+                    today = datetime.now(JST).strftime("%Y-%m-%d")
+                    match = delivery_time == current_time_str
+                    already_delivered = (last_date == today)
+
+                    status = "✅ DELIVER" if (match and not already_delivered) else "⏭️ Skip"
+                    if match and already_delivered:
+                        status = "✓ Already sent today"
+
+                    print(f"   {status} | User: {user_id[:8]}... | Time: '{delivery_time}' | Level: {level} | Last: {last_date}")
+            except Exception as e:
+                print(f"⚠️ Debug query failed: {e}")
 
             targets = get_users_for_delivery(current_time_str)
 
@@ -837,9 +869,27 @@ def handle_message(event):
 
         print(f"💬 [{timestamp}] Message from {user_id[:8]}...: '{text}'")
 
+        # 初回ユーザーチェック（配信回数が0の場合）
+        settings = get_user_settings(user_id)
+        if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ"]:
+            welcome_text = (
+                "縄跳びAIコーチへようこそ！🎉\n\n"
+                "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
+                "📝 まずは設定から始めましょう：\n"
+                "「設定」と送信して、配信時間とレベルを設定してください。\n\n"
+                "💡 または今すぐ試したい場合は：\n"
+                "「今すぐ」と送信してください！\n\n"
+                "【レベルについて】\n"
+                "・初心者：前とび〜三重とび\n"
+                "・中級者：三重とび連続〜SOAS\n"
+                "・上級者：競技フリースタイル選手"
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_text))
+            print(f"👋 [{timestamp}] Welcome message sent to new user")
+            return
+
         # 今すぐ課題を配信
         if text == "今すぐ":
-            settings = get_user_settings(user_id)
             print(f"🚀 [{timestamp}] Immediate delivery requested by {user_id[:8]}...")
             threading.Thread(target=send_challenge_to_user, args=(user_id, settings['level']), daemon=True).start()
             return
