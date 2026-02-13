@@ -53,18 +53,23 @@ USER_LEVELS = {
 COACH_PERSONALITIES = {
     "熱血": {
         "display": "熱血コーチ",
+        "tone": ""
     },
     "優しい": {
         "display": "優しいコーチ",
+        "tone": ""
     },
     "厳しい": {
         "display": "厳しいコーチ",
+        "tone": ""
     },
     "フレンドリー": {
         "display": "フレンドリー",
+        "tone": ""
     },
     "冷静": {
         "display": "冷静な分析官",
+        "tone": ""
     }
 }
 
