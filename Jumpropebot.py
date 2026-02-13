@@ -49,6 +49,30 @@ USER_LEVELS = {
     }
 }
 
+# コーチの性格設定
+COACH_PERSONALITIES = {
+    "熱血": {
+        "description": "情熱的で励ましが多い",
+        "tone": "熱い言葉でガンガン励まします！「いけるぞ！」「その調子だ！」という感じ。"
+    },
+    "優しい": {
+        "description": "丁寧で穏やかな指導",
+        "tone": "優しく丁寧に。「ゆっくりでいいよ」「無理しないでね」という感じ。"
+    },
+    "厳しい": {
+        "description": "ストイックで高い目標設定",
+        "tone": "厳しく的確に。「もっとできる」「まだまだ」という感じ。妥協しない。"
+    },
+    "フレンドリー": {
+        "description": "友達のように親しみやすい",
+        "tone": "タメ口で親しみやすく。「一緒に頑張ろ！」「やばいね！」という感じ。"
+    },
+    "冷静": {
+        "description": "論理的で客観的な分析",
+        "tone": "冷静に分析的に。「データ的には」「効率を考えると」という感じ。"
+    }
+}
+
 # ==========================================
 # データベース接続
 # ==========================================
@@ -72,6 +96,7 @@ def init_database():
                 user_id TEXT PRIMARY KEY,
                 delivery_time TEXT NOT NULL DEFAULT '07:00',
                 level TEXT NOT NULL DEFAULT '初心者',
+                coach_personality TEXT NOT NULL DEFAULT '優しい',
                 delivery_count INTEGER DEFAULT 0,
                 success_count INTEGER DEFAULT 0,
                 difficulty_count INTEGER DEFAULT 0,
@@ -86,7 +111,8 @@ def init_database():
             ("last_delivery_date", "TEXT"),
             ("last_challenge", "TEXT"),
             ("success_count", "INTEGER DEFAULT 0"),
-            ("difficulty_count", "INTEGER DEFAULT 0")
+            ("difficulty_count", "INTEGER DEFAULT 0"),
+            ("coach_personality", "TEXT DEFAULT '優しい'")
         ]
 
         for column_name, column_type in columns_to_add:
@@ -112,7 +138,7 @@ def get_user_settings(user_id):
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT delivery_time, level, delivery_count, success_count, 
+            SELECT delivery_time, level, coach_personality, delivery_count, success_count, 
                    difficulty_count, support_shown, last_delivery_date, last_challenge 
             FROM users WHERE user_id = ?
         ''', (user_id,))
@@ -120,21 +146,22 @@ def get_user_settings(user_id):
 
         if not row:
             cursor.execute('''
-                INSERT INTO users (user_id, delivery_time, level, delivery_count, 
+                INSERT INTO users (user_id, delivery_time, level, coach_personality, delivery_count, 
                                  success_count, difficulty_count, support_shown) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, '07:00', '初心者', 0, 0, 0, 0))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, '07:00', '初心者', '優しい', 0, 0, 0, 0))
             conn.commit()
             conn.close()
             return {
-                'time': '07:00', 'level': '初心者', 'delivery_count': 0,
-                'success_count': 0, 'difficulty_count': 0, 'support_shown': 0,
-                'last_delivery_date': None, 'last_challenge': None
+                'time': '07:00', 'level': '初心者', 'coach_personality': '優しい',
+                'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0, 
+                'support_shown': 0, 'last_delivery_date': None, 'last_challenge': None
             }
 
         result = {
             'time': row['delivery_time'],
             'level': row['level'],
+            'coach_personality': row['coach_personality'] if 'coach_personality' in row.keys() else '優しい',
             'delivery_count': row['delivery_count'],
             'success_count': row['success_count'],
             'difficulty_count': row['difficulty_count'],
@@ -149,16 +176,16 @@ def get_user_settings(user_id):
     except Exception as e:
         print(f"❌ get_user_settings error: {e}")
         return {
-            'time': '07:00', 'level': '初心者', 'delivery_count': 0,
-            'success_count': 0, 'difficulty_count': 0, 'support_shown': 0,
-            'last_delivery_date': None, 'last_challenge': None
+            'time': '07:00', 'level': '初心者', 'coach_personality': '優しい',
+            'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0,
+            'support_shown': 0, 'last_delivery_date': None, 'last_challenge': None
         }
 
 # ==========================================
 # ユーザー設定の更新
 # ==========================================
-def update_user_settings(user_id, delivery_time, level):
-    """配信時間とレベルを更新"""
+def update_user_settings(user_id, delivery_time, level, coach_personality='優しい'):
+    """配信時間、レベル、コーチの性格を更新"""
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -171,17 +198,18 @@ def update_user_settings(user_id, delivery_time, level):
                 delivery_time = f"{hour}:{minute}"
 
         print(f"🔧 Updating settings for {user_id[:8]}...")
-        print(f"   Time: '{delivery_time}', Level: '{level}'")
+        print(f"   Time: '{delivery_time}', Level: '{level}', Personality: '{coach_personality}'")
 
         cursor.execute('''
-            INSERT INTO users (user_id, delivery_time, level, delivery_count, 
+            INSERT INTO users (user_id, delivery_time, level, coach_personality, delivery_count, 
                              success_count, difficulty_count, support_shown, last_delivery_date)
-            VALUES (?, ?, ?, 0, 0, 0, 0, NULL)
+            VALUES (?, ?, ?, ?, 0, 0, 0, 0, NULL)
             ON CONFLICT(user_id) DO UPDATE SET
                 delivery_time = excluded.delivery_time,
                 level = excluded.level,
+                coach_personality = excluded.coach_personality,
                 last_delivery_date = NULL
-        ''', (user_id, delivery_time, level))
+        ''', (user_id, delivery_time, level, coach_personality))
 
         conn.commit()
         conn.close()
@@ -283,63 +311,128 @@ def get_users_for_delivery(target_time):
 # ==========================================
 # AI課題生成（IJRU対応）
 # ==========================================
-def generate_challenge_with_ai(level, user_history):
-    """AIで練習課題を生成"""
+def generate_challenge_with_ai(level, user_history, coach_personality):
+    """AIで練習課題を生成（実際の競技技を使用）"""
     
-    # IJRU採点視点を含むシステムプロンプト
-    system_prompt = """あなたは縄跳びフリースタイル競技のAIコーチです。
-IJRU（International Jump Rope Union）の最新ルールに基づき、以下の採点視点を理解しています：
+    # コーチの性格を反映したシステムプロンプト
+    personality_tone = COACH_PERSONALITIES.get(coach_personality, COACH_PERSONALITIES["優しい"])["tone"]
+    
+    system_prompt = f"""あなたは縄跳びフリースタイル競技のAIコーチです。
+実際の競技で使われる技名を使って、具体的な練習課題を出します。
 
-【IJRU採点の3要素】
-1. **Difficulty（難度）**: 技の難しさ
-2. **Presentation（表現）**: フロー・安定性・構成
-3. **Deductions（減点）**: ミス・停止・構成不足
+【コーチの性格】
+{personality_tone}
+
+【重要な禁止事項】
+- 「フロー」「リカバリー」「クリーンフィニッシュ」という言葉は存在しないので絶対に使わない
+- 抽象的な表現は一切使わない
+- 必ず具体的な技名を使う
 
 【課題設計の原則】
 - 毎日3〜10分で完結する内容
-- 成功条件を明確にする
-- 週1〜2回は「採点アプリで確認」を促す
-- IJRU視点（安定性・フロー・構成）を反映
+- 成功条件を明確にする（回数・秒数など）
+- 技の組み合わせパターンを工夫する
+- 前回と違う課題を出す"""
 
-【トーン】
-- コーチのように前向き
-- 読むのに5秒以内
-- "今日やってみよう"と思える内容"""
-
-    # レベル別の課題ガイドライン
+    # 実際の技リスト
     level_guidelines = {
-        "初心者": """【初心者向け課題】
-対象技: 前とび、後ろとび、あやとび、二重とび、三重とび
-目的: 基礎安定と成功体験
+        "初心者": """【初心者向け技リスト】
+基本技:
+- 三重とび
+
+目標:
+- 三重とびの安定
+- 連続成功を目指す
+
 課題例:
-- 前とび30秒を安定させる
-- 二重とび1回成功
-- 三重とびにチャレンジ（1回でOK）
-- あやとびと二重とびを交互に5セット
+- 「三重とびを1回成功させよう」
+- 「三重とびを3回連続」
+- 「三重とびを5回連続」
+- 「三重とびを10秒間に何回できるか挑戦」
 
-注意: 絶対に難しすぎる課題は出さない""",
+注意:
+- まだEBTJやKNTJは難しすぎる
+- 三重とびの完全な安定が最優先""",
 
-        "中級者": """【中級者向け課題】
-対象技: 三重とび連続、TJ、SOAS、EBとび
-目的: 技の安定とフロー意識
+        "中級者": """【中級者向け技リスト】
+メイン技:
+- 三重とび
+- EBTJ
+- KNTJ
+- インバースEBTJ
+- インバースKNTJ
+- SOAS
+- SOCL
+- SOTS
+
+課題パターン:
+1. 単体練習: 「EBTJを5回」「KNTJを3回」
+2. 組み合わせ: 「EBTJ → KNTJ」「SOAS → SOCL」
+3. 連続: 「三重とび → EBTJ → 三重とび」
+
 課題例:
-- 三重とびを3回連続
-- TJを安定優先で5回
-- SOASをゆっくり確認（1回成功でOK）
-- EB → 二重とび → EB のフロー練習
+- 「EBTJを安定させて5回」
+- 「KNTJ → インバースKNTJ」
+- 「SOAS → SOCL → SOTS の流れ」
+- 「三重とび → EBTJ → KNTJ」
+- 「インバースEBTJを1回成功」
 
-たまに採点アプリを勧める（例: 30秒演技で採点してみよう）""",
+注意:
+- 速さより安定性
+- 技の組み合わせを意識""",
 
-        "上級者": """【上級者向け課題】
-対象技: 競技フリースタイルレベル
-目的: 質・構成・大会意識
-課題タイプ:
-1. 軽い確認（例: SOOASを安定優先で1回）
-2. 連続チャレンジ（例: EBTJ→インバースEBTJ→KNTJ）
-3. 採点ミッション（例: 30秒演技で5点以上を目指し採点アプリで確認）
-4. 構成練習（例: 難度技2つ → リカバリー → クリーンフィニッシュ）
+        "上級者": """【上級者向け技リスト】
 
-IJRU視点を明示的に意識させる課題を含める"""
+基本高難度技:
+- EBTJ、KNTJ、インバースEBTJ、インバースKNTJ
+- SOAS、SOCL、SOTS
+- SSCL、SSTS
+- SOOAS、SOOCL、SOOTS
+
+O系（Open系）:
+- EBTJO、KNTJO
+- インバースEBTJO、インバースKNTJO
+
+CL系:
+- EBTJCL、KNTJCL
+- インバースEBTJCL、インバースKNTJCL
+
+AS系:
+- EBTJAS、KNTJAS
+- インバースEBTJAS、インバースKNTJAS
+
+TS系:
+- EBTJTS、KNTJTS
+- インバースEBTJTS、インバースKNTJTS
+
+その他:
+- 三重リリース
+
+室内推奨技:
+- ドンキー
+- プッシュアップ
+- ロンダートから後ろ二重とび
+
+課題パターン:
+1. 単体確認: 「SOOASを1回」
+2. 複雑な組み合わせ: 「EBTJ → インバースKNTJ → EBTJAS」
+3. O系練習: 「EBTJO → KNTJO」
+4. CL系練習: 「EBTJCL → インバースEBTJCL」
+5. AS/TS系: 「KNTJAS → KNTJTS」
+
+週1回程度の採点アプリ課題:
+- 「採点アプリで15秒フリースタイルを作ってみよう」
+- 「採点アプリで最終得点3点超えを目指そう（プレゼン0.6、リクワイヤードエレメンツとミス含む）」
+- 最終目標: 75秒フリースタイル（得点6点→8点→15点）
+
+課題例:
+- 「SOOASを安定させて1回」
+- 「EBTJ → インバースEBTJ → KNTJ → インバースKNTJ」
+- 「EBTJO → KNTJO → EBTJCL」
+- 「三重リリースに挑戦」
+- 「SSCL → SSTS の組み合わせ」
+- 「ドンキーを室内で練習」（室内推奨技の場合）
+- 「採点アプリで15秒フリースタイル（最終得点3点超え目標）」（週1程度）"""
     }
 
     # ユーザー履歴の分析
@@ -351,41 +444,48 @@ IJRU視点を明示的に意識させる課題を含める"""
         difficulty_rate = user_history['difficulty_count'] / user_history['delivery_count']
     
     adjustment = ""
-    if user_history['delivery_count'] >= 3:  # 最低3回配信後から調整開始
+    if user_history['delivery_count'] >= 3:
         if success_rate > 0.7:
-            adjustment = "ユーザーは好調です。少し難度を上げてチャレンジさせましょう。"
+            adjustment = "ユーザーは好調です。少し難度を上げた技や複雑な組み合わせにチャレンジさせましょう。"
         elif difficulty_rate > 0.5:
-            adjustment = "ユーザーは苦戦中です。今日は軽めで達成感を感じられる課題にしてください。"
+            adjustment = "ユーザーは苦戦中です。確実にできる技で達成感を。"
         elif success_rate > 0.4 and difficulty_rate < 0.3:
-            adjustment = "ユーザーは順調です。現在の難度を維持してください。"
+            adjustment = "ユーザーは順調です。現在の難度を維持。"
+
+    # 採点アプリ課題を週1回程度出す判定
+    scoring_app_reminder = ""
+    if user_history['delivery_count'] > 0 and user_history['delivery_count'] % 7 == 0 and level == "上級者":
+        scoring_app_reminder = "\n\n【重要】今日は採点アプリを使った課題を出してください。採点アプリのリンクも含めること。"
 
     # プロンプト生成
     user_prompt = f"""今日の練習課題を1つ生成してください。
 
 【ユーザー情報】
 レベル: {level}
+コーチの性格: {coach_personality}
 配信回数: {user_history['delivery_count']}回
 成功回数: {user_history['success_count']}回
 難しかった回数: {user_history['difficulty_count']}回
 前回の課題: {user_history.get('last_challenge', 'なし')}
 {adjustment}
+{scoring_app_reminder}
 
 {level_guidelines[level]}
 
 【出力形式】
-必ず以下の形式で出力してください:
+必ず以下の形式で、コーチの性格を反映した口調で出力:
 
 今日のお題：
-（短く具体的な課題。1〜2文で完結）
+（具体的な技名を使った課題。1〜2文で完結。性格に合わせた口調で）
 
-必要に応じて以下を追加:
-→ 採点アプリで確認してみよう
+採点アプリ課題の場合は以下を追加:
+→ 採点アプリ: https://jumprope-bot.onrender.com/scoring
 
-【禁止事項】
-- 長文説明は不要
-- 前回と同じ課題は避ける
-- "###"や"**"などのMarkdown記法は使わない
-- 絵文字は適度に使ってOK"""
+【絶対に禁止】
+- 「フロー」「リカバリー」「クリーンフィニッシュ」は存在しない言葉なので使用禁止
+- 「基礎技」「難しい技」などの抽象的表現は絶対NG
+- 前回と全く同じ課題は避ける
+- "###"や"**"は使わない"""
 
     try:
         response = openai_client.chat.completions.create(
@@ -395,35 +495,57 @@ IJRU視点を明示的に意識させる課題を含める"""
                 {"role": "user", "content": user_prompt}
             ],
             max_completion_tokens=300,
-            temperature=0.7
+            temperature=0.8
         )
         return response.choices[0].message.content.strip()
 
     except Exception as e:
         print(f"❌ OpenAI API Error: {e}")
-        # フォールバック課題
-        fallback = {
-            "初心者": "今日のお題：\n前とび30秒を安定させてみよう！🏃‍♂️",
-            "中級者": "今日のお題：\n三重とびを2回連続で成功させよう！💪",
-            "上級者": "今日のお題：\nSOASを安定優先で1回。質を意識して！✨"
+        # フォールバック課題（性格に応じて変える）
+        fallback_by_personality = {
+            "熱血": {
+                "初心者": "今日のお題：\n三重とび3回連続！絶対いけるぞ！🔥",
+                "中級者": "今日のお題：\nEBTJ → KNTJ！やってやろうぜ！💪",
+                "上級者": "今日のお題：\nSOOAS → SOOCL！お前ならできる！✨"
+            },
+            "優しい": {
+                "初心者": "今日のお題：\n三重とびを3回連続。ゆっくりでいいよ🏃‍♂️",
+                "中級者": "今日のお題：\nEBTJを5回。無理しないでね💪",
+                "上級者": "今日のお題：\nSOOASを1回。質を大切に✨"
+            },
+            "厳しい": {
+                "初心者": "今日のお題：\n三重とび5回連続。できて当然だ",
+                "中級者": "今日のお題：\nKNTJ → インバースKNTJ。妥協するな",
+                "上級者": "今日のお題：\nSOOAS → SOOTS。できるまでやれ"
+            },
+            "フレンドリー": {
+                "初心者": "今日のお題：\n三重とび3回連続いってみよ！✨",
+                "中級者": "今日のお題：\nEBTJ → KNTJ やろ！一緒に頑張ろ！😊",
+                "上級者": "今日のお題：\nSOOASいい感じで決めちゃお！🔥"
+            },
+            "冷静": {
+                "初心者": "今日のお題：\n三重とび3回。安定性を重視してください",
+                "中級者": "今日のお題：\nEBTJ 5回。効率的な動作を意識",
+                "上級者": "今日のお題：\nSOOAS 1回。質を分析してください"
+            }
         }
-        return fallback.get(level, fallback["初心者"])
+        personality_fallback = fallback_by_personality.get(coach_personality, fallback_by_personality["優しい"])
+        return personality_fallback.get(level, personality_fallback["初心者"])
 
-# ==========================================
-# 課題メッセージ作成
-# ==========================================
+
 def create_challenge_message(user_id, level):
     """練習課題メッセージを作成"""
     try:
         settings = get_user_settings(user_id)
-        challenge = generate_challenge_with_ai(level, settings)
+        coach_personality = settings.get('coach_personality', '優しい')
+        challenge = generate_challenge_with_ai(level, settings, coach_personality)
         
         increment_delivery_count(user_id, challenge)
         
         return challenge
     except Exception as e:
         print(f"❌ create_challenge_message error: {e}")
-        return "今日のお題：\n基礎技を1つ、安定優先で練習してみよう！"
+        return "今日のお題：\n前とび30秒を安定させてみよう！"
 
 # ==========================================
 # 課題配信（Push送信）
@@ -602,13 +724,14 @@ def settings():
         if request.method == 'POST':
             new_time = request.form.get('delivery_time')
             new_level = request.form.get('level')
+            new_personality = request.form.get('coach_personality', '優しい')
 
             timestamp = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n⚙️ [{timestamp}] Settings update POST received")
             print(f"   User ID: {user_id[:8]}...")
-            print(f"   Form data: time={new_time}, level={new_level}")
+            print(f"   Form data: time={new_time}, level={new_level}, personality={new_personality}")
 
-            update_user_settings(user_id, new_time, new_level)
+            update_user_settings(user_id, new_time, new_level, new_personality)
 
             return """
             <!DOCTYPE html>
@@ -681,6 +804,12 @@ def settings():
         for level_name, level_info in USER_LEVELS.items():
             selected = 'selected' if level_name == current_settings['level'] else ''
             level_options += f'<option value="{level_name}" {selected}>{level_name}（{level_info["description"]}）</option>'
+
+        personality_options = ''
+        current_personality = current_settings.get('coach_personality', '優しい')
+        for personality_name, personality_info in COACH_PERSONALITIES.items():
+            selected = 'selected' if personality_name == current_personality else ''
+            personality_options += f'<option value="{personality_name}" {selected}>{personality_name}（{personality_info["description"]}）</option>'
 
         html = f"""
         <!DOCTYPE html>
@@ -806,7 +935,7 @@ def settings():
                     <p class="subtitle">配信時間とレベルを設定できます</p>
                 </div>
                 <div class="current-settings">
-                    現在の設定: <strong>{current_settings['time']}</strong> に <strong>{current_settings['level']}</strong>レベル
+                    現在の設定: <strong>{current_settings['time']}</strong> に <strong>{current_settings['level']}</strong>レベル（<strong>{current_personality}</strong>コーチ）
                 </div>
                 <form method="POST">
                     <div class="form-group">
@@ -824,6 +953,16 @@ def settings():
                         </label>
                         <select name="level">
                             {level_options}
+                        </select>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="form-group">
+                        <label>
+                            <span class="label-icon">😊</span>
+                            コーチの性格
+                        </label>
+                        <select name="coach_personality">
+                            {personality_options}
                         </select>
                     </div>
                     <button type="submit">💾 設定を保存する</button>
@@ -874,15 +1013,22 @@ def handle_message(event):
         if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ"]:
             welcome_text = (
                 "縄跳びAIコーチへようこそ！🎉\n\n"
-                "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
+                "このBotは毎日あなたのレベルに合った練習課題（具体的な技名）をお届けします。\n\n"
                 "📝 まずは設定から始めましょう：\n"
-                "「設定」と送信して、配信時間とレベルを設定してください。\n\n"
+                "「設定」と送信して、配信時間・レベル・コーチの性格を設定してください。\n\n"
                 "💡 または今すぐ試したい場合は：\n"
                 "「今すぐ」と送信してください！\n\n"
                 "【レベルについて】\n"
                 "・初心者：前とび〜三重とび\n"
                 "・中級者：三重とび連続〜SOAS\n"
-                "・上級者：競技フリースタイル選手"
+                "・上級者：競技フリースタイル選手\n\n"
+                "【コーチの性格】\n"
+                "・熱血：情熱的な励まし\n"
+                "・優しい：丁寧で穏やか\n"
+                "・厳しい：ストイックに\n"
+                "・フレンドリー：タメ口で親しみやすく\n"
+                "・冷静：論理的で分析的\n\n"
+                "技名は「縄跳び技研究家 ふっくん」チャンネルを参考にしています！"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_text))
             print(f"👋 [{timestamp}] Welcome message sent to new user")
