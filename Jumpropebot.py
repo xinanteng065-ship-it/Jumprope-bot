@@ -52,19 +52,24 @@ USER_LEVELS = {
 # コーチの性格設定
 COACH_PERSONALITIES = {
     "熱血": {
-        "tone": "熱血"
+        "tone": "熱血",
+        "description"
     },
     "優しい": {
-        "tone": "優しい"
+        "tone": "優しい",
+        "description"
     },
     "厳しい": {
-        "tone": "厳しい"
+        "tone": "厳しい",
+        "description"
     },
     "フレンドリー": {
-        "tone": "フレンドリー"
+        "tone": "フレンドリー",
+        "description"
     },
     "冷静": {
-        "tone": "冷静"
+        "tone": "冷静",
+        "description"
     }
 }
 
