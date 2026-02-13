@@ -1045,6 +1045,73 @@ def callback():
         traceback.print_exc()
         return "OK"
 
+                
+
+        # フィードバック: 成功
+        if text in ["できた", "成功", "できました", "クリア", "達成"]:
+            record_feedback(user_id, is_success=True)
+            
+            # コーチの性格に応じた褒め言葉
+            personality = settings.get('coach_personality', '優しい')
+            praise_by_personality = {
+                "熱血": "素晴らしい！！その調子だ！🔥 次回はもっと難しい技にチャレンジだ！💪",
+                "優しい": "素晴らしい！💪 次回の課題で少しレベルアップしますね。無理せず頑張りましょう✨",
+                "厳しい": "まだまだこれからだ。次はもっと高みを目指せ。",
+                "フレンドリー": "やばい！すごいじゃん！✨ 次もこの調子でいこ！一緒に頑張ろ！",
+                "冷静": "データ的に良好です。次回は難度を0.2段階上げます。継続してください。"
+            }
+            reply_text = praise_by_personality.get(personality, praise_by_personality["優しい"])
+            
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"✅ [{timestamp}] Success feedback recorded")
+            return
+
+        # フィードバック: 難しかった
+        if text in ["難しかった", "できなかった", "無理", "難しい", "厳しい"]:
+            record_feedback(user_id, is_success=False)
+            
+            # コーチの性格に応じた励まし
+            personality = settings.get('coach_personality', '優しい')
+            encouragement_by_personality = {
+                "熱血": "大丈夫だ！お前ならできる！🔥 次回は少し軽めにするから、絶対いけるぞ！💪",
+                "優しい": "大丈夫！次回は少し軽めの課題にしますね。焦らず続けましょう🙌 ゆっくりでいいからね",
+                "厳しい": "できなかったか。次回は少し戻すが、すぐにまた挑戦してもらう。諦めるな。",
+                "フレンドリー": "大丈夫大丈夫！次は少し軽くするね。焦らずいこ！一緒に頑張ろ😊",
+                "冷静": "難度設定を調整します。次回は0.3段階下げて再トライしてください。"
+            }
+            reply_text = encouragement_by_personality.get(personality, encouragement_by_personality["優しい"])
+            
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"⚠️ [{timestamp}] Difficulty feedback recorded")
+            return
+
+        # 設定画面へのリンクを送信
+        if text == "設定":
+            settings_url = f"{APP_PUBLIC_URL}/settings?user_id={user_id}"
+            reply_text = (
+                "⚙️ 設定\n"
+                "以下のリンクから配信時間とレベルを変更できます。\n\n"
+                f"{settings_url}\n\n"
+                "※リンクを知っている人は誰でも設定を変更できてしまうため、他人に教えないでください。"
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"⚙️ [{timestamp}] Settings link sent")
+            return
+
+        # 友だちに紹介する機能
+        if text in ["友だちに紹介する", "友達に紹介する", "紹介"]:
+            line_add_url = f"https://line.me/R/ti/p/{LINE_BOT_ID}"
+            reply_text = (
+                "📢 友だちに紹介\n\n"
+                "縄跳びAIコーチを友だちに紹介していただきありがとうございます！\n\n"
+                "以下のリンクを友だちに転送してください👇\n\n"
+                f"🔗 友だち追加リンク\n{line_add_url}\n\n"
+                "💡 紹介してくれると開発の励みになります！"
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"👥 [{timestamp}] Friend referral sent")
+            return
+
 @webhook_handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     """LINEメッセージを受信したときの処理"""
@@ -1078,6 +1145,19 @@ def handle_message(event):
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_text))
             print(f"👋 [{timestamp}] Welcome message sent to new user")
+            return
+
+        # 設定画面へのリンクを送信
+        if text == "設定":
+            settings_url = f"{APP_PUBLIC_URL}/settings?user_id={user_id}"
+            reply_text = (
+                "⚙️ 設定\n"
+                "以下のリンクから配信時間とレベルを変更できます。\n\n"
+                f"{settings_url}\n\n"
+                "※リンクを知っている人は誰でも設定を変更できてしまうため、他人に教えないでください。"
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"⚙️ [{timestamp}] Settings link sent")
             return
 
         # 今すぐ課題を配信（1日3回まで）
@@ -1137,6 +1217,11 @@ def handle_message(event):
             conn.close()
             
             print(f"🚀 [{timestamp}] Immediate delivery requested by {user_id[:8]}... ({immediate_count + 1}/3 today)")
+            
+            # 即座に応答を返す
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="課題を生成中です...少々お待ちください⏳"))
+            
+            # 課題配信はバックグラウンドで実行
             threading.Thread(target=send_challenge_to_user, args=(user_id, settings['level']), daemon=True).start()
             return
 
@@ -1176,19 +1261,6 @@ def handle_message(event):
             
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             print(f"⚠️ [{timestamp}] Difficulty feedback recorded")
-            return
-
-        # 設定画面へのリンクを送信
-        if text == "設定":
-            settings_url = f"{APP_PUBLIC_URL}/settings?user_id={user_id}"
-            reply_text = (
-                "⚙️ 設定\n"
-                "以下のリンクから配信時間とレベルを変更できます。\n\n"
-                f"{settings_url}\n\n"
-                "※リンクを知っている人は誰でも設定を変更できてしまうため、他人に教えないでください。"
-            )
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            print(f"⚙️ [{timestamp}] Settings link sent")
             return
 
         # 友だちに紹介する機能
