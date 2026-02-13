@@ -874,7 +874,7 @@ def settings():
         current_personality = current_settings.get('coach_personality', '優しい')
         for personality_name, personality_info in COACH_PERSONALITIES.items():
             selected = 'selected' if personality_name == current_personality else ''
-            personality_options += f'<option value="{personality_name}" {selected}>{personality_name}（{personality_info["description"]}）</option>'
+            personality_options += f'<option value="{personality_name}" {selected}>{personality_name}（{personality_info["tone"]}）</option>'
 
         html = f"""
         <!DOCTYPE html>
