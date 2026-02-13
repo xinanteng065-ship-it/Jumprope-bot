@@ -167,7 +167,7 @@ def get_user_settings(user_id):
 # ユーザー設定の更新
 # ==========================================
 def update_user_settings(user_id, delivery_time, level, coach_personality='優しい'):
-    """配信時間、レベル、コーチの性格を更新"""
+    """配信時間、レベル、コーチの性格を更新（delivery_countを0にリセット）"""
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -190,12 +190,15 @@ def update_user_settings(user_id, delivery_time, level, coach_personality='優�
                 delivery_time = excluded.delivery_time,
                 level = excluded.level,
                 coach_personality = excluded.coach_personality,
+                delivery_count = 0,
+                success_count = 0,
+                difficulty_count = 0,
                 last_delivery_date = NULL
         ''', (user_id, delivery_time, level, coach_personality))
 
         conn.commit()
         conn.close()
-        print(f"✅ Settings saved successfully")
+        print(f"✅ Settings saved successfully (delivery_count reset to 0)")
 
     except Exception as e:
         print(f"❌ update_user_settings error: {e}")
@@ -454,14 +457,11 @@ TS系:
 4. O系練習: 「EBTJO → KNTJ」（O系は1個）
 5. CL/AS/TS系: 「EBTJ → EBTJCL」（最後に1つだけ）
 
-週1回程度の特別課題（その他・室内・採点系）:
+週1回程度の特別課題（その他・室内のみ）:
 - 「三重リリースに挑戦」
 - 「ドンキーを室内で練習」
 - 「プッシュアップを室内で練習」
 - 「ロンダートから後ろ二重とびに挑戦」
-- 「採点アプリで15秒フリースタイルを作ってみよう」
-- 「採点アプリで最終得点3点超えを目指そう（プレゼン0.6、リクワイヤードエレメンツとミス含む）」
-- 最終目標: 75秒フリースタイル（得点5点→6点→8点→10点→12点）（プレゼン0.6、リクワイヤードエレメンツとミス含む）
 
 課題例:
 - 「SOOASを安定させて1回」
@@ -470,8 +470,7 @@ TS系:
 - 「EBTJ → KNTJ → EBTJCL」
 - 「三重リリースに挑戦」（週1の特別課題）
 - 「SSCL → SSTS」
-- 「ドンキーを室内で練習」（週1の特別課題）
-- 「採点アプリで15秒フリースタイル（最終得点3点超え目標）」（週1の特別課題）"""
+- 「ドンキーを室内で練習」（週1の特別課題）"""
     }
 
     # ユーザー履歴の分析
@@ -491,11 +490,14 @@ TS系:
         elif success_rate > 0.4 and difficulty_rate < 0.3:
             adjustment = "ユーザーは順調です。現在の難度を維持。"
 
-    # 週1回の特別課題判定（その他・室内・採点系）
+    # 7日目判定（次の配信が7の倍数かチェック）
+    is_seventh_day = (user_history['delivery_count'] + 1) % 7 == 0
+    
+    # 週1回の特別課題判定（その他・室内技のみ、採点アプリは除外）
     special_challenge_reminder = ""
-    if user_history['delivery_count'] > 0 and user_history['delivery_count'] % 7 == 0:
+    if is_seventh_day:
         if level == "上級者":
-            special_challenge_reminder = "\n\n【重要】今日は週1回の特別課題を出してください。以下から選択:\n- その他技（三重リリース）\n- 室内推奨技（ドンキー、プッシュアップ、ロンダートから後ろ二重とび）\n- 採点アプリ課題（15秒フリースタイル、得点3点超えなど）"
+            special_challenge_reminder = "\n\n【重要】今日は週1回の特別課題を出してください。以下から選択:\n- その他技（三重リリース）\n- 室内推奨技（ドンキー、プッシュアップ、ロンダートから後ろ二重とび）\n\n※採点アプリ課題は別途リンクとして表示されるので、ここでは選択しないでください"
         else:
             special_challenge_reminder = "\n\n【重要】今日は週1回の特別課題を出してください（普段より少し変わった課題）。"
 
@@ -520,17 +522,14 @@ TS系:
 今日のお題：
 （具体的な技名を使った課題。1〜2文で完結。性格に合わせた口調で）
 
-採点アプリ課題の場合は以下を追加:
-→ 採点アプリ: https://jumprope-scorer.netlify.app
-→ 採点アプリの使い方: https://official-jumprope-scorer.netlify.app
-
 【絶対に禁止】
 - 「フロー」「リカバリー」「クリーンフィニッシュ」は存在しない言葉なので使用禁止
 - 「基礎技」「難しい技」などの抽象的表現は絶対NG
 - CL系、AS系、TS系を連続に入れるのは禁止
 - O系を連続に2個以上入れるのは禁止
 - 前回と全く同じ課題は避ける
-- "###"や"**"は使わない"""
+- "###"や"**"は使わない
+- 採点アプリへのリンクは含めない（別途表示されます）"""
 
     try:
         response = openai_client.chat.completions.create(
@@ -542,7 +541,18 @@ TS系:
             max_completion_tokens=300,
             temperature=0.8
         )
-        return response.choices[0].message.content.strip()
+        challenge_text = response.choices[0].message.content.strip()
+        
+        # 7日目（7の倍数）の場合は採点リンクを追加
+        if is_seventh_day:
+            challenge_text += (
+                "\n\n📊 採点アプリで挑戦！\n"
+                "→ 採点アプリ: https://jumprope-scorer.netlify.app\n"
+                "→ 使い方: https://official-jumprope-scorer.netlify.app\n\n"
+                "15秒フリースタイルを作って得点3点超えを目指そう！"
+            )
+        
+        return challenge_text
 
     except Exception as e:
         print(f"❌ OpenAI API Error: {e}")
@@ -1045,73 +1055,6 @@ def callback():
         traceback.print_exc()
         return "OK"
 
-                
-
-        # フィードバック: 成功
-        if text in ["できた", "成功", "できました", "クリア", "達成"]:
-            record_feedback(user_id, is_success=True)
-            
-            # コーチの性格に応じた褒め言葉
-            personality = settings.get('coach_personality', '優しい')
-            praise_by_personality = {
-                "熱血": "素晴らしい！！その調子だ！🔥 次回はもっと難しい技にチャレンジだ！💪",
-                "優しい": "素晴らしい！💪 次回の課題で少しレベルアップしますね。無理せず頑張りましょう✨",
-                "厳しい": "まだまだこれからだ。次はもっと高みを目指せ。",
-                "フレンドリー": "やばい！すごいじゃん！✨ 次もこの調子でいこ！一緒に頑張ろ！",
-                "冷静": "データ的に良好です。次回は難度を0.2段階上げます。継続してください。"
-            }
-            reply_text = praise_by_personality.get(personality, praise_by_personality["優しい"])
-            
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            print(f"✅ [{timestamp}] Success feedback recorded")
-            return
-
-        # フィードバック: 難しかった
-        if text in ["難しかった", "できなかった", "無理", "難しい", "厳しい"]:
-            record_feedback(user_id, is_success=False)
-            
-            # コーチの性格に応じた励まし
-            personality = settings.get('coach_personality', '優しい')
-            encouragement_by_personality = {
-                "熱血": "大丈夫だ！お前ならできる！🔥 次回は少し軽めにするから、絶対いけるぞ！💪",
-                "優しい": "大丈夫！次回は少し軽めの課題にしますね。焦らず続けましょう🙌 ゆっくりでいいからね",
-                "厳しい": "できなかったか。次回は少し戻すが、すぐにまた挑戦してもらう。諦めるな。",
-                "フレンドリー": "大丈夫大丈夫！次は少し軽くするね。焦らずいこ！一緒に頑張ろ😊",
-                "冷静": "難度設定を調整します。次回は0.3段階下げて再トライしてください。"
-            }
-            reply_text = encouragement_by_personality.get(personality, encouragement_by_personality["優しい"])
-            
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            print(f"⚠️ [{timestamp}] Difficulty feedback recorded")
-            return
-
-        # 設定画面へのリンクを送信
-        if text == "設定":
-            settings_url = f"{APP_PUBLIC_URL}/settings?user_id={user_id}"
-            reply_text = (
-                "⚙️ 設定\n"
-                "以下のリンクから配信時間とレベルを変更できます。\n\n"
-                f"{settings_url}\n\n"
-                "※リンクを知っている人は誰でも設定を変更できてしまうため、他人に教えないでください。"
-            )
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            print(f"⚙️ [{timestamp}] Settings link sent")
-            return
-
-        # 友だちに紹介する機能
-        if text in ["友だちに紹介する", "友達に紹介する", "紹介"]:
-            line_add_url = f"https://line.me/R/ti/p/{LINE_BOT_ID}"
-            reply_text = (
-                "📢 友だちに紹介\n\n"
-                "縄跳びAIコーチを友だちに紹介していただきありがとうございます！\n\n"
-                "以下のリンクを友だちに転送してください👇\n\n"
-                f"🔗 友だち追加リンク\n{line_add_url}\n\n"
-                "💡 紹介してくれると開発の励みになります！"
-            )
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-            print(f"👥 [{timestamp}] Friend referral sent")
-            return
-
 @webhook_handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     """LINEメッセージを受信したときの処理"""
@@ -1218,10 +1161,7 @@ def handle_message(event):
             
             print(f"🚀 [{timestamp}] Immediate delivery requested by {user_id[:8]}... ({immediate_count + 1}/3 today)")
             
-            # 即座に応答を返す
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="課題を生成中です...少々お待ちください⏳"))
-            
-            # 課題配信はバックグラウンドで実行
+            # 課題配信はバックグラウンドで実行（応答なし）
             threading.Thread(target=send_challenge_to_user, args=(user_id, settings['level']), daemon=True).start()
             return
 
