@@ -19,9 +19,9 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://yourapp.onrender.com")
+APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://jumprope-bot.onrender.com")
 BOOTH_SUPPORT_URL = "https://yourapp.booth.pm/items/xxxxxxx"
-LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@xxxxxxxx")
+LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
 
 if not all([LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, OPENAI_API_KEY]):
     raise ValueError("🚨 必要な環境変数が設定されていません")
