@@ -44,7 +44,7 @@ USER_LEVELS = {
         "focus": "技の安定とフロー"
     },
     "上級者": {
-        "description": "フリースタイル選手",
+        "description": "選手レベル",
         "focus": "質・構成・大会意識"
     }
 }
