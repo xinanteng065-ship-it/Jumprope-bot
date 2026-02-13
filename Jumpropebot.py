@@ -2,8 +2,7 @@ import os
 import sqlite3
 import threading
 import time
-import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from pytz import timezone
 from flask import Flask, request, abort, render_template_string
 from linebot import LineBotApi, WebhookHandler
@@ -50,28 +49,7 @@ USER_LEVELS = {
 }
 
 # コーチの性格設定
-COACH_PERSONALITIES = {
-    "熱血": {
-        "tone": "熱血",
-        "description"
-    },
-    "優しい": {
-        "tone": "優しい",
-        "description"
-    },
-    "厳しい": {
-        "tone": "厳しい",
-        "description"
-    },
-    "フレンドリー": {
-        "tone": "フレンドリー",
-        "description"
-    },
-    "冷静": {
-        "tone": "冷静",
-        "description"
-    }
-}
+COACH_PERSONALITIES = ["熱血", "優しい", "厳しい", "フレンドリー", "冷静"]
 
 # ==========================================
 # データベース接続
@@ -318,14 +296,11 @@ def get_users_for_delivery(target_time):
 def generate_challenge_with_ai(level, user_history, coach_personality):
     """AIで練習課題を生成（実際の競技技を使用）"""
     
-    # コーチの性格を反映したシステムプロンプト
-    personality_tone = COACH_PERSONALITIES.get(coach_personality, COACH_PERSONALITIES["優しい"])["tone"]
-    
     system_prompt = f"""あなたは縄跳びフリースタイル競技のAIコーチです。
 実際の競技で使われる技名を使って、具体的な練習課題を出します。
 
 【コーチの性格】
-{personality_tone}
+{coach_personality}
 
 【重要な禁止事項】
 - 「フロー」「リカバリー」「クリーンフィニッシュ」という言葉は存在しないので絶対に使わない
@@ -870,16 +845,18 @@ def settings():
 
         current_settings = get_user_settings(user_id)
 
+        # レベルのオプション生成
         level_options = ''
         for level_name, level_info in USER_LEVELS.items():
             selected = 'selected' if level_name == current_settings['level'] else ''
             level_options += f'<option value="{level_name}" {selected}>{level_name}（{level_info["description"]}）</option>'
 
+        # コーチの性格のオプション生成（シンプルに名前のみ）
         personality_options = ''
         current_personality = current_settings.get('coach_personality', '優しい')
-        for personality_name, personality_info in COACH_PERSONALITIES.items():
+        for personality_name in COACH_PERSONALITIES:
             selected = 'selected' if personality_name == current_personality else ''
-            personality_options += f'<option value="{personality_name}" {selected}>{personality_name}（{personality_info["tone"]}）</option>'
+            personality_options += f'<option value="{personality_name}" {selected}>{personality_name}</option>'
 
         html = f"""
         <!DOCTYPE html>
