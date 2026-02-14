@@ -299,23 +299,55 @@ def get_users_for_delivery(target_time):
 def generate_challenge_with_ai(level, user_history, coach_personality):
     """AIで練習課題を生成（実際の競技技を使用）"""
     
+    # コーチの性格別の口調と特徴を明確に定義
+    personality_styles = {
+        "熱血": {
+            "tone": "熱く励ます。「！」「💪」「🔥」を多用。「お前」「やってやろうぜ」「絶対いけるぞ」などの表現",
+            "example": "よっしゃ！今日も全力でいくぞ！🔥"
+        },
+        "優しい": {
+            "tone": "丁寧で優しく。「ですます調」。「ゆっくりでいいよ」「無理しないでね」などの配慮",
+            "example": "今日も無理せず、楽しく練習しましょうね😊"
+        },
+        "厳しい": {
+            "tone": "短く厳格に。「だ・である調」。「妥協するな」「できて当然」などの厳しさ",
+            "example": "甘えは許さん。やるからには本気でやれ"
+        },
+        "フレンドリー": {
+            "tone": "タメ口で親しみやすく。「！」を適度に。「いこ！」「やろ！」「一緒に頑張ろ」",
+            "example": "今日も一緒に楽しく練習しよ！😊"
+        },
+        "冷静": {
+            "tone": "論理的で分析的。「です・ます調」。「データ的に」「効率的に」などの客観的表現",
+            "example": "本日の課題を論理的に設計しました"
+        }
+    }
+    
+    current_style = personality_styles.get(coach_personality, personality_styles["優しい"])
+    
     system_prompt = f"""あなたは縄跳びフリースタイル競技のAIコーチです。
 実際の競技で使われる技名を使って、具体的な練習課題を出します。
 
-【コーチの性格】
-{coach_personality}
+【重要】あなたのコーチとしての性格は「{coach_personality}」です。
+この性格を絶対に守ってください。他の性格に変わってはいけません。
+
+【{coach_personality}コーチの口調と特徴】
+{current_style["tone"]}
+例: {current_style["example"]}
 
 【重要な禁止事項】
 - 「フロー」「リカバリー」「クリーンフィニッシュ」という言葉は存在しないので絶対に使わない
 - 抽象的な表現は一切使わない
 - 必ず具体的な技名を使う
+- 指定された性格以外の口調は絶対に使わない
 
 【課題設計の原則】
 - 毎日3〜10分で完結する内容
 - 成功条件を明確にする（回数・秒数など）
 - 技の組み合わせパターンを工夫する
 - 前回と違う課題を出す
-- 段階的な難度上昇を意識する"""
+- 段階的な難度上昇を意識する
+- 技だけでなく、励ましや応援のメッセージも入れる"""
 
     # 実際の技リスト
     level_guidelines = {
@@ -529,10 +561,15 @@ TS系:
 {level_guidelines[level]}
 
 【出力形式】
-必ず以下の形式で、コーチの性格を反映した口調で出力:
+必ず以下の形式で、{coach_personality}の性格を100%反映した口調で出力してください：
 
 今日のお題：
-（具体的な技名を使った課題。1〜2文で完結。性格に合わせた口調で）
+（具体的な技名を使った課題。1〜2文で完結。）
+
+（励ましや応援のメッセージを1〜2文で追加。{coach_personality}の性格を強く反映させる）
+
+【出力例（{coach_personality}コーチ）】
+{current_style["example"]}
 
 【絶対に禁止】
 - 「フロー」「リカバリー」「クリーンフィニッシュ」は存在しない言葉なので使用禁止
@@ -541,7 +578,8 @@ TS系:
 - O系を連続に2個以上入れるのは禁止
 - 前回と全く同じ課題は避ける
 - "###"や"**"は使わない
-- 採点アプリへのリンクは含めない（別途表示されます）"""
+- 採点アプリへのリンクは含めない（別途表示されます）
+- 指定された性格（{coach_personality}）以外の口調は絶対に使わない"""
 
     try:
         response = openai_client.chat.completions.create(
@@ -550,8 +588,8 @@ TS系:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            max_completion_tokens=300,
-            temperature=0.8
+            max_completion_tokens=400,
+            temperature=0.9
         )
         challenge_text = response.choices[0].message.content.strip()
         
@@ -571,29 +609,29 @@ TS系:
         # フォールバック課題（性格に応じて変える）
         fallback_by_personality = {
             "熱血": {
-                "初心者": "今日のお題：\n三重とび3回連続！絶対いけるぞ！🔥",
-                "中級者": "今日のお題：\nEBTJ → KNTJ！やってやろうぜ！💪",
-                "上級者": "今日のお題：\nSOOAS → SOOCL！お前ならできる！✨"
+                "初心者": "今日のお題：\n三重とび3回連続！\n\n絶対いけるぞ！お前の力を信じてる！💪🔥",
+                "中級者": "今日のお題：\nEBTJ → KNTJ！\n\nやってやろうぜ！全力でぶつかれ！🔥",
+                "上級者": "今日のお題：\nSOOAS → SOOCL！\n\nお前ならできる！限界突破だ！✨💪"
             },
             "優しい": {
-                "初心者": "今日のお題：\n三重とびを3回連続。ゆっくりでいいよ🏃‍♂️",
-                "中級者": "今日のお題：\nEBTJを5回。無理しないでね💪",
-                "上級者": "今日のお題：\nSOOASを1回。質を大切に✨"
+                "初心者": "今日のお題：\n三重とびを3回連続。\n\nゆっくりでいいので、焦らず練習しましょうね😊",
+                "中級者": "今日のお題：\nEBTJを5回。\n\n無理しないでくださいね。少しずつ上達していきましょう💪",
+                "上級者": "今日のお題：\nSOOASを1回。\n\n質を大切に、丁寧に練習してみてください✨"
             },
             "厳しい": {
-                "初心者": "今日のお題：\n三重とび5回連続。できて当然だ",
-                "中級者": "今日のお題：\nKNTJ → インバースKNTJ。妥協するな",
-                "上級者": "今日のお題：\nSOOAS → SOOTS。できるまでやれ"
+                "初心者": "今日のお題：\n三重とび5回連続。\n\nできて当然だ。甘えるな。",
+                "中級者": "今日のお題：\nKNTJ → インバースKNTJ。\n\n妥協するな。完璧を目指せ。",
+                "上級者": "今日のお題：\nSOOAS → SOOTS。\n\nできるまでやれ。結果が全てだ。"
             },
             "フレンドリー": {
-                "初心者": "今日のお題：\n三重とび3回連続いってみよ！✨",
-                "中級者": "今日のお題：\nEBTJ → KNTJ やろ！一緒に頑張ろ！😊",
-                "上級者": "今日のお題：\nSOOASいい感じで決めちゃお！🔥"
+                "初心者": "今日のお題：\n三重とび3回連続いってみよ！\n\n楽しくやろ！一緒に頑張ろ！✨😊",
+                "中級者": "今日のお題：\nEBTJ → KNTJ やろ！\n\n一緒に頑張ろ！絶対できるって！💪",
+                "上級者": "今日のお題：\nSOOASいい感じで決めちゃお！\n\nお前ならいけるって！信じてる！🔥"
             },
             "冷静": {
-                "初心者": "今日のお題：\n三重とび3回。安定性を重視してください",
-                "中級者": "今日のお題：\nEBTJ 5回。効率的な動作を意識",
-                "上級者": "今日のお題：\nSOOAS 1回。質を分析してください"
+                "初心者": "今日のお題：\n三重とび3回。\n\n安定性を重視して、効率的な動作を心がけてください。",
+                "中級者": "今日のお題：\nEBTJ 5回。\n\n動作の効率性を分析しながら練習してください。",
+                "上級者": "今日のお題：\nSOOAS 1回。\n\n質を分析し、データ的に最適な動作を目指してください。"
             }
         }
         personality_fallback = fallback_by_personality.get(coach_personality, fallback_by_personality["優しい"])
@@ -876,6 +914,8 @@ def settings():
         # コーチの性格のオプション生成（シンプルに名前のみ）
         personality_options = ''
         current_personality = current_settings.get('coach_personality', '優しい')
+        
+        # COACH_PERSONALITIESリストから取得（説明なし）
         for personality_name in COACH_PERSONALITIES:
             selected = 'selected' if personality_name == current_personality else ''
             personality_options += f'<option value="{personality_name}" {selected}>{personality_name}</option>'
