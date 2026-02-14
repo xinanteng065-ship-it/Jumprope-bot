@@ -673,7 +673,7 @@ def send_challenge_to_user(user_id, level):
         if settings['delivery_count'] >= 10 and settings['support_shown'] == 0:
             support_message = (
                 "いつも練習お疲れ様です！🙏\n\n"
-                "この縄跳びAIコーチは個人開発で、サーバー代やAI利用料を自腹で運営しています。\n\n"
+                "このなわ太コーチは個人開発で、サーバー代やAI利用料を自腹で運営しています。\n\n"
                 "もし応援していただけるなら、100円の応援PDFをBoothに置いています。\n"
                 "無理はしないでください🙏\n\n"
                 f"↓応援はこちらから\n{BOOTH_SUPPORT_URL}"
@@ -926,7 +926,7 @@ def settings():
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>練習設定 - 縄跳びAIコーチ</title>
+            <title>練習設定 - なわ太コーチ</title>
             <style>
                 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
                 body {{
@@ -1119,9 +1119,9 @@ def handle_message(event):
 
         # 初回ユーザーチェック（配信回数が0の場合）
         settings = get_user_settings(user_id)
-        if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ"]:
+        if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ", "できた", "難しかった", "友だちに紹介する"]:
             welcome_text = (
-                "Jumprope-botです！\n\n"
+                "こんにちは！なわたコーチです！\n\n"
                 "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
                 "📝 まずは設定から始めましょう：\n"
                 "「設定」と送信して、配信時間・レベル・コーチの性格を設定してください。\n\n"
@@ -1136,7 +1136,7 @@ def handle_message(event):
                 "・優しい：丁寧で穏やか\n"
                 "・厳しい：ストイックに\n"
                 "・フレンドリー：タメ口で親しみやすく\n"
-                "・冷静：論理的で分析的\n\n"
+                "・冷静：論理的で分析的"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_text))
             print(f"👋 [{timestamp}] Welcome message sent to new user")
@@ -1260,7 +1260,7 @@ def handle_message(event):
             line_add_url = f"https://line.me/R/ti/p/{LINE_BOT_ID}"
             reply_text = (
                 "📢 友だちに紹介\n\n"
-                "縄跳びAIコーチを友だちに紹介していただきありがとうございます！\n\n"
+                "なわ太コーチを友だちに紹介していただきありがとうございます！\n\n"
                 "以下のリンクを友だちに転送してください👇\n\n"
                 f"🔗 友だち追加リンク\n{line_add_url}\n\n"
                 "💡 紹介してくれると開発の励みになります！"
