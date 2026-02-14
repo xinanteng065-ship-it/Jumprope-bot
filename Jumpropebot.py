@@ -298,7 +298,7 @@ def get_users_for_delivery(target_time):
 # ==========================================
 def generate_challenge_with_ai(level, user_history, coach_personality):
     """AIで練習課題を生成（実際の競技技を使用）"""
-    
+
     # コーチの性格別の口調と特徴を明確に定義
     personality_styles = {
         "熱血": {
@@ -322,9 +322,9 @@ def generate_challenge_with_ai(level, user_history, coach_personality):
             "example": "本日の課題を論理的に設計しました"
         }
     }
-    
+
     current_style = personality_styles.get(coach_personality, personality_styles["優しい"])
-    
+
     system_prompt = f"""あなたは縄跳びフリースタイル競技のAIコーチです。
 実際の競技で使われる技名を使って、具体的な練習課題を出します。
 
@@ -367,8 +367,9 @@ def generate_challenge_with_ai(level, user_history, coach_personality):
 
 目標:
 - 縄跳びを好きになってもらう
-- 三重とびの安定
-- 連続成功を目指す
+- 初心者にはアドバイスを欠かさずに
+- 三重とびの成功
+- それぞれの技の連続成功を目指す
 
 課題例:
 - 「前とびを10回連続」
@@ -384,9 +385,11 @@ def generate_challenge_with_ai(level, user_history, coach_personality):
 メイン技:
 - 三重とび
 - トード
+- EB
 - AS
 - CL
 - TS
+- EBトード
 - TJ
 - インバースTJ
 - EBTJ
@@ -399,30 +402,35 @@ def generate_challenge_with_ai(level, user_history, coach_personality):
 - SSCL
 - SSTS
 
+目標:
+- 縄跳び競技の技を覚えてもらう
+- EBTJやSOASなどの技を連続で安定できることを目標にする
+
 【重要な難度ガイドライン】
 - 最初は単体練習から始める（例: 三重とびを5回連続）
-- 慣れてきたら2技連続（例: EBTJ → KNTJ）
-- さらに慣れたら3技連続（例: EBTJ → KNTJ → SOAS）
+- 慣れてきたら単発の技（例: トード）
+- さらに慣れたら（例: TJやEBTJなど）
+- 最終的には（例: EBTJ → KNTJ → SOCL）
 
-【禁止の組み合わせ】
-- CL系、AS系、TS系は連続に入れない（単発のみ）
-- O系は連続に入れる場合は1個まで
+【禁止行為】
+- 5連続や10連続など多すぎる連続（3連続まで）
+- 5回や10回成功させろなどはダメ（3回まで）
 
 課題パターン:
-1. 単体練習: 「EBTJを5回」「KNTJを3回」
+1. 単体練習: 「EBTJを1回」「KNTJを3回」
 2. 基本の組み合わせ: 「EBTJ → KNTJ」「三重とび → EBTJ」
 3. 3技連続: 「EBTJ → KNTJ → 三重とび」
 
 課題例:
-- 「EBTJを安定させて5回」
+- 「EBTJを安定させて3回」
 - 「KNTJ → インバースKNTJ」
 - 「SOAS → SOCL」（これはOK）
 - 「三重とび → EBTJ → KNTJ」
 - 「インバースEBTJを1回成功」
 
 【NG例】
-- ❌「SOCL → SOAS → SOTS」（CL系連続はNG）
-- ❌「EBTJ → KNTJ → SOAS → SOCL」（CL系連続はNG）
+- ❌「EBTJ → KNTJ → SOAS → SOCL」（4連続はNG）
+- ❌「AS,CL,TS,EB,トード,EBトード」は連続技に入れてはいけない
 
 注意:
 - 速さより安定性
@@ -454,13 +462,29 @@ TS系:
 
 その他:
 - 三重リリース
+- リリースOCL
 - 四重とび
 - 三重とび10回連続
+- クルーガーラップ
+- EBトードラップ
+- ASO
+- TS0
+- ASCL
+- ASTS
 
 室内推奨技:
 - ドンキー
+- ドンキークロス
 - プッシュアップ
+- プッシュアップクロス
+- カミカゼ
 - ロンダートから後ろ二重とび
+
+激ムズ室内推奨技（室内推奨技を全部クリアしてから出すように）
+- 後ろドンキー
+- 後ろプッシュアップ
+- ドンキー二重
+- プッシュアップ二重
 
 【重要な難度ガイドライン】
 - 最初は基本高難度技の単発から（例: SOOASを1回）
@@ -468,7 +492,7 @@ TS系:
 - さらに慣れたら3技連続（例: EBTJ → インバースEBTJ → KNTJ）
 
 【禁止の組み合わせ】
-- CL系、AS系、TS系は連続に入れない（単発のみ or 最後に1つだけ）
+- CL系、AS系、TS系は連続に入れない（単発のみ）
 - O系は連続に入れる場合は1個まで
 
 【OK例】
@@ -508,15 +532,15 @@ TS系:
     # ユーザー履歴の分析（直近3回のフィードバックを重視）
     success_rate = 0
     difficulty_rate = 0
-    
+
     # 最近のフィードバック状況を重視（直近の傾向を見る）
     recent_feedback_count = min(user_history['delivery_count'], 3)
-    
+
     if user_history['delivery_count'] > 0:
         # 全体の成功率
         success_rate = user_history['success_count'] / user_history['delivery_count']
         difficulty_rate = user_history['difficulty_count'] / user_history['delivery_count']
-    
+
     adjustment = ""
     if user_history['delivery_count'] >= 2:
         # 直近2回以上のデータがある場合
@@ -528,11 +552,11 @@ TS系:
             adjustment = "ユーザーは順調です。現在の難度を維持してください（同じレベルで違うバリエーション）。"
         else:
             adjustment = "ユーザーの状況は中間です。少しだけ難度を下げるか、同じレベルの別パターンを試してください。"
-    
+
     # 配信回数に基づく7日目判定（1週間ごと）
     # delivery_count % 7 == 6 の時、次の配信（7回目）が7日目
     is_seventh_day = (user_history['delivery_count'] % 7 == 6)
-    
+
     # 週1回の特別課題判定（その他・室内技のみ、採点アプリは除外）
     special_challenge_reminder = ""
     if is_seventh_day:
@@ -589,10 +613,10 @@ TS系:
                 {"role": "user", "content": user_prompt}
             ],
             max_completion_tokens=400,
-            temperature=0.9
+            temperature=0.7
         )
         challenge_text = response.choices[0].message.content.strip()
-        
+
         # 7日目（配信回数 % 7 == 6）の場合は採点リンクを追加
         if is_seventh_day:
             challenge_text += (
@@ -601,7 +625,7 @@ TS系:
                 "→ 使い方: https://official-jumprope-scorer.netlify.app\n\n"
                 "15秒フリースタイルを作って得点3点超えを目指そう！"
             )
-        
+
         return challenge_text
 
     except Exception as e:
@@ -644,9 +668,9 @@ def create_challenge_message(user_id, level):
         settings = get_user_settings(user_id)
         coach_personality = settings.get('coach_personality', '優しい')
         challenge = generate_challenge_with_ai(level, settings, coach_personality)
-        
+
         increment_delivery_count(user_id, challenge)
-        
+
         return challenge
     except Exception as e:
         print(f"❌ create_challenge_message error: {e}")
@@ -663,10 +687,10 @@ def send_challenge_to_user(user_id, level):
         print(f"📤 [{timestamp}] Sending challenge to {user_id[:8]}... (Level: {level})")
 
         challenge_content = create_challenge_message(user_id, level)
-        
+
         # フィードバック促進を課題に追加
         full_message = challenge_content + "\n\n💬 フィードバック\n「できた」「難しかった」と送ると、次回の課題が調整されます！"
-        
+
         messages = [TextSendMessage(text=full_message)]
 
         settings = get_user_settings(user_id)
@@ -914,7 +938,7 @@ def settings():
         # コーチの性格のオプション生成（シンプルに名前のみ）
         personality_options = ''
         current_personality = current_settings.get('coach_personality', '優しい')
-        
+
         # COACH_PERSONALITIESリストから取得（説明なし）
         for personality_name in COACH_PERSONALITIES:
             selected = 'selected' if personality_name == current_personality else ''
@@ -1121,6 +1145,7 @@ def handle_message(event):
         settings = get_user_settings(user_id)
         if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ", "できた", "難しかった", "友だちに紹介する"]:
             welcome_text = (
+                "Jumprope-botです！\n\n"
                 "こんにちは！なわたコーチです！\n\n"
                 "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
                 "📝 まずは設定から始めましょう：\n"
@@ -1136,6 +1161,7 @@ def handle_message(event):
                 "・優しい：丁寧で穏やか\n"
                 "・厳しい：ストイックに\n"
                 "・フレンドリー：タメ口で親しみやすく\n"
+                "・冷静：論理的で分析的\n\n"
                 "・冷静：論理的で分析的"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_text))
@@ -1159,7 +1185,7 @@ def handle_message(event):
         if text == "今すぐ":
             # 今日の日付を取得
             today = datetime.now(JST).strftime("%Y-%m-%d")
-            
+
             # 今日の即時配信回数をチェック
             conn = get_db()
             cursor = conn.cursor()
@@ -1168,14 +1194,14 @@ def handle_message(event):
                 FROM users WHERE user_id = ?
             ''', (user_id,))
             row = cursor.fetchone()
-            
+
             immediate_count = 0
             last_request_date = None
-            
+
             if row:
                 immediate_count = row['immediate_request_count'] or 0
                 last_request_date = row['last_immediate_request_date']
-            
+
             # 日付が変わっていたらカウントをリセット
             if last_request_date != today:
                 immediate_count = 0
@@ -1185,9 +1211,9 @@ def handle_message(event):
                     WHERE user_id = ?
                 ''', (today, user_id))
                 conn.commit()
-            
+
             conn.close()
-            
+
             # 1日3回までの制限チェック
             if immediate_count >= 3:
                 reply_text = (
@@ -1199,7 +1225,7 @@ def handle_message(event):
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
                 print(f"🚫 [{timestamp}] Immediate delivery limit reached for {user_id[:8]}...")
                 return
-            
+
             # カウントを増やす
             conn = get_db()
             cursor = conn.cursor()
@@ -1210,9 +1236,9 @@ def handle_message(event):
             ''', (immediate_count + 1, today, user_id))
             conn.commit()
             conn.close()
-            
+
             print(f"🚀 [{timestamp}] Immediate delivery requested by {user_id[:8]}... ({immediate_count + 1}/3 today)")
-            
+
             # 課題配信はバックグラウンドで実行（応答なし）
             threading.Thread(target=send_challenge_to_user, args=(user_id, settings['level']), daemon=True).start()
             return
@@ -1220,7 +1246,7 @@ def handle_message(event):
         # フィードバック: 成功
         if text in ["できた", "成功", "できました", "クリア", "達成"]:
             record_feedback(user_id, is_success=True)
-            
+
             # コーチの性格に応じた褒め言葉
             personality = settings.get('coach_personality', '優しい')
             praise_by_personality = {
@@ -1231,7 +1257,7 @@ def handle_message(event):
                 "冷静": "データ的に良好です。次回は難度を0.2段階上げます。継続してください。"
             }
             reply_text = praise_by_personality.get(personality, praise_by_personality["優しい"])
-            
+
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             print(f"✅ [{timestamp}] Success feedback recorded")
             return
@@ -1239,7 +1265,7 @@ def handle_message(event):
         # フィードバック: 難しかった
         if text in ["難しかった", "できなかった", "無理", "難しい", "厳しい"]:
             record_feedback(user_id, is_success=False)
-            
+
             # コーチの性格に応じた励まし
             personality = settings.get('coach_personality', '優しい')
             encouragement_by_personality = {
@@ -1250,7 +1276,7 @@ def handle_message(event):
                 "冷静": "難度設定を調整します。次回は0.3段階下げて再トライしてください。"
             }
             reply_text = encouragement_by_personality.get(personality, encouragement_by_personality["優しい"])
-            
+
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             print(f"⚠️ [{timestamp}] Difficulty feedback recorded")
             return
@@ -1260,6 +1286,7 @@ def handle_message(event):
             line_add_url = f"https://line.me/R/ti/p/{LINE_BOT_ID}"
             reply_text = (
                 "📢 友だちに紹介\n\n"
+                "縄跳びAIコーチを友だちに紹介していただきありがとうございます！\n\n"
                 "なわ太コーチを友だちに紹介していただきありがとうございます！\n\n"
                 "以下のリンクを友だちに転送してください👇\n\n"
                 f"🔗 友だち追加リンク\n{line_add_url}\n\n"
