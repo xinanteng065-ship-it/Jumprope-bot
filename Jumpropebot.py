@@ -1,7 +1,5 @@
 import os
 import sqlite3
-import threading
-import time
 from datetime import datetime
 from pytz import timezone
 from flask import Flask, request, abort, render_template_string
@@ -72,29 +70,30 @@ def init_database():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
-                delivery_time TEXT NOT NULL DEFAULT '07:00',
                 level TEXT NOT NULL DEFAULT '初心者',
                 coach_personality TEXT NOT NULL DEFAULT '優しい',
                 delivery_count INTEGER DEFAULT 0,
                 success_count INTEGER DEFAULT 0,
                 difficulty_count INTEGER DEFAULT 0,
                 support_shown INTEGER DEFAULT 0,
-                last_delivery_date TEXT,
                 last_challenge TEXT,
                 immediate_request_count INTEGER DEFAULT 0,
-                last_immediate_request_date TEXT
+                last_immediate_request_date TEXT,
+                streak_days INTEGER DEFAULT 0,
+                last_challenge_date TEXT
             )
         ''')
 
         # 既存テーブルへのカラム追加（必要に応じて）
         columns_to_add = [
-            ("last_delivery_date", "TEXT"),
             ("last_challenge", "TEXT"),
             ("success_count", "INTEGER DEFAULT 0"),
             ("difficulty_count", "INTEGER DEFAULT 0"),
             ("coach_personality", "TEXT DEFAULT '優しい'"),
             ("immediate_request_count", "INTEGER DEFAULT 0"),
-            ("last_immediate_request_date", "TEXT")
+            ("last_immediate_request_date", "TEXT"),
+            ("streak_days", "INTEGER DEFAULT 0"),
+            ("last_challenge_date", "TEXT")
         ]
 
         for column_name, column_type in columns_to_add:
@@ -120,36 +119,37 @@ def get_user_settings(user_id):
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT delivery_time, level, coach_personality, delivery_count, success_count, 
-                   difficulty_count, support_shown, last_delivery_date, last_challenge 
+            SELECT level, coach_personality, delivery_count, success_count, 
+                   difficulty_count, support_shown, last_challenge, streak_days, last_challenge_date 
             FROM users WHERE user_id = ?
         ''', (user_id,))
         row = cursor.fetchone()
 
         if not row:
             cursor.execute('''
-                INSERT INTO users (user_id, delivery_time, level, coach_personality, delivery_count, 
-                                 success_count, difficulty_count, support_shown) 
+                INSERT INTO users (user_id, level, coach_personality, delivery_count, 
+                                 success_count, difficulty_count, support_shown, streak_days) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, '07:00', '初心者', '優しい', 0, 0, 0, 0))
+            ''', (user_id, '初心者', '優しい', 0, 0, 0, 0, 0))
             conn.commit()
             conn.close()
             return {
-                'time': '07:00', 'level': '初心者', 'coach_personality': '優しい',
+                'level': '初心者', 'coach_personality': '優しい',
                 'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0, 
-                'support_shown': 0, 'last_delivery_date': None, 'last_challenge': None
+                'support_shown': 0, 'last_challenge': None, 'streak_days': 0,
+                'last_challenge_date': None
             }
 
         result = {
-            'time': row['delivery_time'],
             'level': row['level'],
             'coach_personality': row['coach_personality'] if 'coach_personality' in row.keys() else '優しい',
             'delivery_count': row['delivery_count'],
             'success_count': row['success_count'],
             'difficulty_count': row['difficulty_count'],
             'support_shown': row['support_shown'],
-            'last_delivery_date': row['last_delivery_date'],
-            'last_challenge': row['last_challenge']
+            'last_challenge': row['last_challenge'],
+            'streak_days': row['streak_days'] if 'streak_days' in row.keys() else 0,
+            'last_challenge_date': row['last_challenge_date'] if 'last_challenge_date' in row.keys() else None
         }
 
         conn.close()
@@ -158,47 +158,36 @@ def get_user_settings(user_id):
     except Exception as e:
         print(f"❌ get_user_settings error: {e}")
         return {
-            'time': '07:00', 'level': '初心者', 'coach_personality': '優しい',
+            'level': '初心者', 'coach_personality': '優しい',
             'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0,
-            'support_shown': 0, 'last_delivery_date': None, 'last_challenge': None
+            'support_shown': 0, 'last_challenge': None, 'streak_days': 0,
+            'last_challenge_date': None
         }
 
 # ==========================================
 # ユーザー設定の更新
 # ==========================================
-def update_user_settings(user_id, delivery_time, level, coach_personality='優しい'):
-    """配信時間、レベル、コーチの性格を更新（delivery_countを0にリセット）"""
+def update_user_settings(user_id, level, coach_personality='優しい'):
+    """レベル、コーチの性格を更新"""
     try:
         conn = get_db()
         cursor = conn.cursor()
 
-        if delivery_time and ':' in delivery_time:
-            parts = delivery_time.split(':')
-            if len(parts) >= 2:
-                hour = parts[0].strip().zfill(2)
-                minute = parts[1].strip().zfill(2)
-                delivery_time = f"{hour}:{minute}"
-
         print(f"🔧 Updating settings for {user_id[:8]}...")
-        print(f"   Time: '{delivery_time}', Level: '{level}', Personality: '{coach_personality}'")
+        print(f"   Level: '{level}', Personality: '{coach_personality}'")
 
         cursor.execute('''
-            INSERT INTO users (user_id, delivery_time, level, coach_personality, delivery_count, 
-                             success_count, difficulty_count, support_shown, last_delivery_date)
-            VALUES (?, ?, ?, ?, 0, 0, 0, 0, NULL)
+            INSERT INTO users (user_id, level, coach_personality, delivery_count, 
+                             success_count, difficulty_count, support_shown, streak_days)
+            VALUES (?, ?, ?, 0, 0, 0, 0, 0)
             ON CONFLICT(user_id) DO UPDATE SET
-                delivery_time = excluded.delivery_time,
                 level = excluded.level,
-                coach_personality = excluded.coach_personality,
-                delivery_count = 0,
-                success_count = 0,
-                difficulty_count = 0,
-                last_delivery_date = NULL
-        ''', (user_id, delivery_time, level, coach_personality))
+                coach_personality = excluded.coach_personality
+        ''', (user_id, level, coach_personality))
 
         conn.commit()
         conn.close()
-        print(f"✅ Settings saved successfully (delivery_count reset to 0)")
+        print(f"✅ Settings saved successfully")
 
     except Exception as e:
         print(f"❌ update_user_settings error: {e}")
@@ -206,22 +195,81 @@ def update_user_settings(user_id, delivery_time, level, coach_personality='優�
         traceback.print_exc()
 
 # ==========================================
-# 配信回数のカウント
+# 連続記録の更新
 # ==========================================
-def increment_delivery_count(user_id, challenge_text):
-    """配信回数を1増やし、今日の日付と課題を記録"""
+def update_streak(user_id):
+    """連続記録を更新（今日課題をもらった場合）"""
     try:
         conn = get_db()
         cursor = conn.cursor()
         today = datetime.now(JST).strftime("%Y-%m-%d")
 
         cursor.execute('''
+            SELECT streak_days, last_challenge_date 
+            FROM users WHERE user_id = ?
+        ''', (user_id,))
+        row = cursor.fetchone()
+
+        current_streak = 0
+        last_date = None
+
+        if row:
+            current_streak = row['streak_days'] or 0
+            last_date = row['last_challenge_date']
+
+        # 連続記録の判定
+        if last_date == today:
+            # 今日すでに課題をもらっている場合は何もしない
+            conn.close()
+            return current_streak
+        elif last_date:
+            # 前回の日付をチェック
+            last_dt = datetime.strptime(last_date, "%Y-%m-%d")
+            today_dt = datetime.strptime(today, "%Y-%m-%d")
+            diff_days = (today_dt - last_dt).days
+
+            if diff_days == 1:
+                # 連続している場合は+1
+                current_streak += 1
+            else:
+                # 途切れている場合はリセット
+                current_streak = 1
+        else:
+            # 初回の場合
+            current_streak = 1
+
+        # データベース更新
+        cursor.execute('''
+            UPDATE users 
+            SET streak_days = ?, last_challenge_date = ?
+            WHERE user_id = ?
+        ''', (current_streak, today, user_id))
+
+        conn.commit()
+        conn.close()
+
+        print(f"✅ Streak updated: {current_streak} days for {user_id[:8]}...")
+        return current_streak
+
+    except Exception as e:
+        print(f"❌ update_streak error: {e}")
+        return 0
+
+# ==========================================
+# 配信回数のカウント
+# ==========================================
+def increment_delivery_count(user_id, challenge_text):
+    """配信回数を1増やし、課題を記録"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute('''
             UPDATE users 
             SET delivery_count = delivery_count + 1, 
-                last_delivery_date = ?, 
                 last_challenge = ? 
             WHERE user_id = ?
-        ''', (today, challenge_text, user_id))
+        ''', (challenge_text, user_id))
 
         conn.commit()
         conn.close()
@@ -264,39 +312,9 @@ def mark_support_shown(user_id):
         print(f"❌ mark_support_shown error: {e}")
 
 # ==========================================
-# 配信対象ユーザーを取得
-# ==========================================
-def get_users_for_delivery(target_time):
-    """指定時刻に配信すべきユーザーを取得（今日まだ配信していない人のみ）"""
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-        today = datetime.now(JST).strftime("%Y-%m-%d")
-
-        cursor.execute('''
-            SELECT user_id, level, delivery_time FROM users 
-            WHERE (last_delivery_date IS NULL OR last_delivery_date != ?)
-        ''', (today,))
-
-        all_candidates = cursor.fetchall()
-        matched_users = []
-
-        for row in all_candidates:
-            db_time = row['delivery_time'].strip()
-            if db_time == target_time:
-                matched_users.append((row['user_id'], row['level']))
-
-        conn.close()
-        return matched_users
-
-    except Exception as e:
-        print(f"❌ get_users_for_delivery error: {e}")
-        return []
-
-# ==========================================
 # AI課題生成（IJRU対応）
 # ==========================================
-def generate_challenge_with_ai(level, user_history, coach_personality):
+def generate_challenge_with_ai(level, user_history, coach_personality, streak_days):
     """AIで練習課題を生成（実際の競技技を使用）"""
 
     # コーチの性格別の口調と特徴を明確に定義
@@ -533,9 +551,6 @@ TS系:
     success_rate = 0
     difficulty_rate = 0
 
-    # 最近のフィードバック状況を重視（直近の傾向を見る）
-    recent_feedback_count = min(user_history['delivery_count'], 3)
-
     if user_history['delivery_count'] > 0:
         # 全体の成功率
         success_rate = user_history['success_count'] / user_history['delivery_count']
@@ -553,17 +568,12 @@ TS系:
         else:
             adjustment = "ユーザーの状況は中間です。少しだけ難度を下げるか、同じレベルの別パターンを試してください。"
 
-    # 配信回数に基づく7日目判定（1週間ごと）
-    # delivery_count % 7 == 6 の時、次の配信（7回目）が7日目
-    is_seventh_day = (user_history['delivery_count'] % 7 == 6)
+    # 10日ごとの特別課題判定（採点アプリ）- 10日から100日まで
+    is_special_day = (streak_days > 0 and streak_days % 10 == 0 and streak_days <= 100)
 
-    # 週1回の特別課題判定（その他・室内技のみ、採点アプリは除外）
     special_challenge_reminder = ""
-    if is_seventh_day:
-        if level == "上級者":
-            special_challenge_reminder = "\n\n【重要】今日は7日目（週1回の特別課題日）です。以下から選択:\n- その他技（三重リリース、四重とび）\n- 室内推奨技（ドンキー、プッシュアップ、ロンダートから後ろ二重とび）\n\n※採点アプリ課題は別途リンクとして表示されるので、ここでは選択しないでください"
-        else:
-            special_challenge_reminder = "\n\n【重要】今日は7日目（週1回の特別課題日）です。普段より少し変わった課題を出してください。"
+    if is_special_day:
+        special_challenge_reminder = f"\n\n【重要】今日は連続記録{streak_days}日目の節目です。通常の課題を出した後、採点アプリでのチャレンジを追加してください。段階的に難度が上がる特別課題を用意しています。"
 
     # プロンプト生成
     user_prompt = f"""今日の練習課題を1つ生成してください。
@@ -571,6 +581,7 @@ TS系:
 【ユーザー情報】
 レベル: {level}
 コーチの性格: {coach_personality}
+連続記録: {streak_days}日目
 配信回数: {user_history['delivery_count']}回
 成功回数: {user_history['success_count']}回
 難しかった回数: {user_history['difficulty_count']}回
@@ -617,14 +628,74 @@ TS系:
         )
         challenge_text = response.choices[0].message.content.strip()
 
-        # 7日目（配信回数 % 7 == 6）の場合は採点リンクを追加
-        if is_seventh_day:
-            challenge_text += (
-                "\n\n📊 採点アプリで挑戦！\n"
-                "→ 採点アプリ: https://jumprope-scorer.netlify.app\n"
-                "→ 使い方: https://official-jumprope-scorer.netlify.app\n\n"
-                "15秒フリースタイルを作って得点3点超えを目指そう！"
-            )
+        # 10日ごとの特別課題（採点アプリ）- 段階的にレベルアップ
+        if is_special_day and streak_days <= 100:
+            # 連続記録に応じた課題設定
+            special_challenges = {
+                10: {
+                    "duration": "15秒",
+                    "target": "3点超え",
+                    "message": "まずは15秒のフリースタイルを作ってみよう！"
+                },
+                20: {
+                    "duration": "30秒",
+                    "target": "5点超え",
+                    "message": "少し長めの30秒に挑戦！技のバリエーションを増やそう！"
+                },
+                30: {
+                    "duration": "30秒",
+                    "target": "6点超え",
+                    "message": "30秒で6点を目指そう！質を意識して！"
+                },
+                40: {
+                    "duration": "45秒",
+                    "target": "7点超え",
+                    "message": "45秒のフリースタイル！構成力が試されるよ！"
+                },
+                50: {
+                    "duration": "60秒",
+                    "target": "8点超え",
+                    "message": "1分間のフリースタイル！スタミナと技術の両立！"
+                },
+                60: {
+                    "duration": "60秒",
+                    "target": "9点超え",
+                    "message": "1分で9点！大会レベルに近づいてきた！"
+                },
+                70: {
+                    "duration": "75秒",
+                    "target": "9点超え",
+                    "message": "ついに大会と同じ75秒！本番さながらの緊張感を！"
+                },
+                80: {
+                    "duration": "75秒",
+                    "target": "9.5点超え",
+                    "message": "75秒で9.5点！完成度を極めよう！"
+                },
+                90: {
+                    "duration": "75秒",
+                    "target": "10点超え",
+                    "message": "10点の壁に挑戦！完璧な演技を目指して！"
+                },
+                100: {
+                    "duration": "75秒",
+                    "target": "10点超え",
+                    "message": "🎊100日達成おめでとう！！🎊 最高峰の演技で有終の美を飾ろう！"
+                }
+            }
+            
+            challenge_info = special_challenges.get(streak_days)
+            if challenge_info:
+                challenge_text += (
+                    f"\n\n🎉 連続記録{streak_days}日目達成！特別課題！\n"
+                    "📊 採点アプリで挑戦！\n"
+                    "→ 採点アプリ: https://jumprope-scorer.netlify.app\n"
+                    "→ 使い方: https://official-jumprope-scorer.netlify.app\n\n"
+                    f"【今回の課題】\n"
+                    f"{challenge_info['duration']}のフリースタイルを作って最終得点{challenge_info['target']}を目指そう！\n"
+                    f"（プレゼンテーションは0.6、ミスとリクワイヤードエレメンツの減点も含む）\n\n"
+                    f"💬 {challenge_info['message']}"
+                )
 
         return challenge_text
 
@@ -667,136 +738,21 @@ def create_challenge_message(user_id, level):
     try:
         settings = get_user_settings(user_id)
         coach_personality = settings.get('coach_personality', '優しい')
-        challenge = generate_challenge_with_ai(level, settings, coach_personality)
+        
+        # 連続記録を更新
+        streak_days = update_streak(user_id)
+        
+        challenge = generate_challenge_with_ai(level, settings, coach_personality, streak_days)
 
         increment_delivery_count(user_id, challenge)
 
-        return challenge
+        # 連続記録を先頭に追加
+        streak_message = f"🔥 連続記録: {streak_days}日目！\n\n"
+        
+        return streak_message + challenge
     except Exception as e:
         print(f"❌ create_challenge_message error: {e}")
         return "今日のお題：\n前とび30秒を安定させてみよう！"
-
-# ==========================================
-# 課題配信（Push送信）
-# ==========================================
-def send_challenge_to_user(user_id, level):
-    """ユーザーに課題をPush送信"""
-    timestamp = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
-
-    try:
-        print(f"📤 [{timestamp}] Sending challenge to {user_id[:8]}... (Level: {level})")
-
-        challenge_content = create_challenge_message(user_id, level)
-
-        # フィードバック促進を課題に追加
-        full_message = challenge_content + "\n\n💬 フィードバック\n「できた」「難しかった」と送ると、次回の課題が調整されます！"
-
-        messages = [TextSendMessage(text=full_message)]
-
-        settings = get_user_settings(user_id)
-        if settings['delivery_count'] >= 10 and settings['support_shown'] == 0:
-            support_message = (
-                "いつも練習お疲れ様です！🙏\n\n"
-                "このなわ太コーチは個人開発で、サーバー代やAI利用料を自腹で運営しています。\n\n"
-                "もし応援していただけるなら、100円の応援PDFをBoothに置いています。\n"
-                "無理はしないでください🙏\n\n"
-                f"↓応援はこちらから\n{BOOTH_SUPPORT_URL}"
-            )
-            messages.append(TextSendMessage(text=support_message))
-            mark_support_shown(user_id)
-            print(f"💝 [{timestamp}] Support message added")
-
-        line_bot_api.push_message(user_id, messages)
-        print(f"✅ [{timestamp}] Successfully sent to {user_id[:8]}...")
-
-    except Exception as e:
-        print(f"❌ [{timestamp}] Push error: {e}")
-        import traceback
-        traceback.print_exc()
-
-# ==========================================
-# スケジューラー
-# ==========================================
-def schedule_checker():
-    """毎分00秒に正確に実行するスケジューラー"""
-    print("🚀 Scheduler thread started")
-
-    now = datetime.now(JST)
-    seconds_to_wait = 60 - now.second
-    if now.microsecond > 0:
-        seconds_to_wait -= now.microsecond / 1000000.0
-
-    print(f"⏱️ Waiting {seconds_to_wait:.2f}s to sync with next minute...")
-    time.sleep(seconds_to_wait)
-
-    last_checked_minute = None
-
-    while True:
-        try:
-            now_jst = datetime.now(JST)
-            current_time_str = now_jst.strftime("%H:%M")
-            current_minute_key = now_jst.strftime("%Y%m%d%H%M")
-            timestamp = now_jst.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
-            if current_minute_key == last_checked_minute:
-                time.sleep(0.5)
-                continue
-
-            last_checked_minute = current_minute_key
-            print(f"\n⏰ [{timestamp}] Checking deliveries for {current_time_str}")
-
-            # デバッグ: 全ユーザーの設定を表示
-            try:
-                conn = get_db()
-                cursor = conn.cursor()
-                cursor.execute('SELECT user_id, delivery_time, level, last_delivery_date FROM users')
-                all_users = cursor.fetchall()
-                conn.close()
-
-                print(f"📊 Total registered users: {len(all_users)}")
-                for row in all_users:
-                    user_id = row['user_id']
-                    delivery_time = row['delivery_time'].strip()
-                    level = row['level']
-                    last_date = row['last_delivery_date']
-
-                    today = datetime.now(JST).strftime("%Y-%m-%d")
-                    match = delivery_time == current_time_str
-                    already_delivered = (last_date == today)
-
-                    status = "✅ DELIVER" if (match and not already_delivered) else "⏭️ Skip"
-                    if match and already_delivered:
-                        status = "✓ Already sent today"
-
-                    print(f"   {status} | User: {user_id[:8]}... | Time: '{delivery_time}' | Level: {level} | Last: {last_date}")
-            except Exception as e:
-                print(f"⚠️ Debug query failed: {e}")
-
-            targets = get_users_for_delivery(current_time_str)
-
-            if targets:
-                print(f"📬 Found {len(targets)} user(s) to deliver")
-                for user_id, level in targets:
-                    print(f"   → Delivering to {user_id[:8]}... ({level})")
-                    threading.Thread(target=send_challenge_to_user, args=(user_id, level), daemon=True).start()
-            else:
-                print(f"   ℹ️ No deliveries for {current_time_str}")
-
-            now = datetime.now(JST)
-            seconds_to_wait = 60 - now.second
-            if now.microsecond > 0:
-                seconds_to_wait -= now.microsecond / 1000000.0
-            if seconds_to_wait < 1:
-                seconds_to_wait = 60 + seconds_to_wait
-
-            time.sleep(seconds_to_wait)
-
-        except Exception as e:
-            error_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
-            print(f"❌ [{error_time}] Scheduler error: {e}")
-            import traceback
-            traceback.print_exc()
-            time.sleep(60)
 
 # ==========================================
 # Flask Routes
@@ -851,16 +807,15 @@ def settings():
             """, 400
 
         if request.method == 'POST':
-            new_time = request.form.get('delivery_time')
             new_level = request.form.get('level')
             new_personality = request.form.get('coach_personality', '優しい')
 
             timestamp = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n⚙️ [{timestamp}] Settings update POST received")
             print(f"   User ID: {user_id[:8]}...")
-            print(f"   Form data: time={new_time}, level={new_level}, personality={new_personality}")
+            print(f"   Form data: level={new_level}, personality={new_personality}")
 
-            update_user_settings(user_id, new_time, new_level, new_personality)
+            update_user_settings(user_id, new_level, new_personality)
 
             return """
             <!DOCTYPE html>
@@ -920,7 +875,7 @@ def settings():
                 <div class="container">
                     <div class="success-icon">✓</div>
                     <h2>設定を保存しました！</h2>
-                    <p>設定した時間に課題が届きます。</p>
+                    <p>「今すぐ」と送信すると課題が届きます。</p>
                     <div class="back-notice">LINEの画面に戻ってください</div>
                 </div>
             </body>
@@ -935,11 +890,10 @@ def settings():
             selected = 'selected' if level_name == current_settings['level'] else ''
             level_options += f'<option value="{level_name}" {selected}>{level_name}（{level_info["description"]}）</option>'
 
-        # コーチの性格のオプション生成（シンプルに名前のみ）
+        # コーチの性格のオプション生成
         personality_options = ''
         current_personality = current_settings.get('coach_personality', '優しい')
 
-        # COACH_PERSONALITIESリストから取得（説明なし）
         for personality_name in COACH_PERSONALITIES:
             selected = 'selected' if personality_name == current_personality else ''
             personality_options += f'<option value="{personality_name}" {selected}>{personality_name}</option>'
@@ -1008,7 +962,7 @@ def settings():
                     margin-bottom: 10px;
                 }}
                 .label-icon {{ font-size: 18px; }}
-                input[type="time"], select {{
+                select {{
                     width: 100%;
                     padding: 14px 16px;
                     font-size: 16px;
@@ -1017,14 +971,6 @@ def settings():
                     background-color: #f8f9fa;
                     transition: all 0.3s ease;
                     font-family: inherit;
-                }}
-                input[type="time"]:focus, select:focus {{
-                    outline: none;
-                    border-color: #667eea;
-                    background-color: white;
-                    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-                }}
-                select {{
                     cursor: pointer;
                     appearance: none;
                     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
@@ -1032,6 +978,12 @@ def settings():
                     background-position: right 12px center;
                     background-size: 20px;
                     padding-right: 40px;
+                }}
+                select:focus {{
+                    outline: none;
+                    border-color: #667eea;
+                    background-color: white;
+                    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
                 }}
                 button {{
                     width: 100%;
@@ -1065,20 +1017,12 @@ def settings():
                 <div class="header">
                     <div class="header-icon">🏋️</div>
                     <h2>練習設定</h2>
-                    <p class="subtitle">配信時間とレベルを設定できます</p>
+                    <p class="subtitle">レベルとコーチの性格を設定できます</p>
                 </div>
                 <div class="current-settings">
-                    現在の設定: <strong>{current_settings['time']}</strong> に <strong>{current_settings['level']}</strong>レベル（<strong>{current_personality}</strong>コーチ）
+                    現在の設定: <strong>{current_settings['level']}</strong>レベル（<strong>{current_personality}</strong>コーチ）
                 </div>
                 <form method="POST">
-                    <div class="form-group">
-                        <label>
-                            <span class="label-icon">🕐</span>
-                            配信時間
-                        </label>
-                        <input type="time" name="delivery_time" value="{current_settings['time']}" required>
-                    </div>
-                    <div class="divider"></div>
                     <div class="form-group">
                         <label>
                             <span class="label-icon">🎯</span>
@@ -1149,7 +1093,7 @@ def handle_message(event):
                 "こんにちは！なわたコーチです！\n\n"
                 "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
                 "📝 まずは設定から始めましょう：\n"
-                "「設定」と送信して、配信時間・レベル・コーチの性格を設定してください。\n\n"
+                "「設定」と送信して、レベル・コーチの性格を設定してください。\n\n"
                 "💡 または今すぐ試したい場合は：\n"
                 "「今すぐ」と送信してください！\n\n"
                 "【レベルについて】\n"
@@ -1162,7 +1106,7 @@ def handle_message(event):
                 "・厳しい：ストイックに\n"
                 "・フレンドリー：タメ口で親しみやすく\n"
                 "・冷静：論理的で分析的\n\n"
-                "・冷静：論理的で分析的"
+                "🔥 毎日「今すぐ」を送って連続記録を伸ばそう！"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_text))
             print(f"👋 [{timestamp}] Welcome message sent to new user")
@@ -1173,7 +1117,7 @@ def handle_message(event):
             settings_url = f"{APP_PUBLIC_URL}/settings?user_id={user_id}"
             reply_text = (
                 "⚙️ 設定\n"
-                "以下のリンクから配信時間とレベルを変更できます。\n\n"
+                "以下のリンクからレベルとコーチの性格を変更できます。\n\n"
                 f"{settings_url}\n\n"
                 "※リンクを知っている人は誰でも設定を変更できてしまうため、他人に教えないでください。"
             )
@@ -1181,7 +1125,7 @@ def handle_message(event):
             print(f"⚙️ [{timestamp}] Settings link sent")
             return
 
-        # 今すぐ課題を配信（1日3回まで）
+        # 今すぐ課題を配信（1日3回まで、replyで即座に返信）
         if text == "今すぐ":
             # 今日の日付を取得
             today = datetime.now(JST).strftime("%Y-%m-%d")
@@ -1220,7 +1164,7 @@ def handle_message(event):
                     "⚠️ 本日の「今すぐ」は3回まで利用できます。\n\n"
                     "すでに3回使用済みです。\n"
                     "明日またお試しください！\n\n"
-                    "💡 設定した時間の自動配信は制限なく届きますよ✨"
+                    "💡 毎日続けて連続記録を伸ばそう🔥"
                 )
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
                 print(f"🚫 [{timestamp}] Immediate delivery limit reached for {user_id[:8]}...")
@@ -1239,8 +1183,29 @@ def handle_message(event):
 
             print(f"🚀 [{timestamp}] Immediate delivery requested by {user_id[:8]}... ({immediate_count + 1}/3 today)")
 
-            # 課題配信はバックグラウンドで実行（応答なし）
-            threading.Thread(target=send_challenge_to_user, args=(user_id, settings['level']), daemon=True).start()
+            # 課題を生成してreplyで返信
+            challenge_content = create_challenge_message(user_id, settings['level'])
+
+            # フィードバック促進を課題に追加
+            full_message = challenge_content + "\n\n💬 フィードバック\n「できた」「難しかった」と送ると、次回の課題が調整されます！"
+
+            messages = [TextSendMessage(text=full_message)]
+
+            # 応援メッセージ（10回配信後、1回だけ）
+            if settings['delivery_count'] >= 10 and settings['support_shown'] == 0:
+                support_message = (
+                    "いつも練習お疲れ様です！🙏\n\n"
+                    "このなわ太コーチは個人開発で、サーバー代やAI利用料を自腹で運営しています。\n\n"
+                    "もし応援していただけるなら、100円の応援PDFをBoothに置いています。\n"
+                    "無理はしないでください🙏\n\n"
+                    f"↓応援はこちらから\n{BOOTH_SUPPORT_URL}"
+                )
+                messages.append(TextSendMessage(text=support_message))
+                mark_support_shown(user_id)
+                print(f"💝 [{timestamp}] Support message added")
+
+            line_bot_api.reply_message(event.reply_token, messages)
+            print(f"✅ [{timestamp}] Challenge sent via reply")
             return
 
         # フィードバック: 成功
@@ -1286,7 +1251,6 @@ def handle_message(event):
             line_add_url = f"https://line.me/R/ti/p/{LINE_BOT_ID}"
             reply_text = (
                 "📢 友だちに紹介\n\n"
-                "縄跳びAIコーチを友だちに紹介していただきありがとうございます！\n\n"
                 "なわ太コーチを友だちに紹介していただきありがとうございます！\n\n"
                 "以下のリンクを友だちに転送してください👇\n\n"
                 f"🔗 友だち追加リンク\n{line_add_url}\n\n"
@@ -1301,10 +1265,11 @@ def handle_message(event):
             event.reply_token,
             TextSendMessage(text=(
                 "💡メニュー\n"
-                "・「今すぐ」: 今すぐ課題を受信\n"
-                "・「設定」: 時間やレベルを変更\n"
+                "・「今すぐ」: 今すぐ課題を受信（1日3回まで）\n"
+                "・「設定」: レベルやコーチの性格を変更\n"
                 "・「できた」「難しかった」: フィードバック\n"
-                "・「友だちに紹介する」: 友だちに紹介"
+                "・「友だちに紹介する」: 友だちに紹介\n\n"
+                "🔥 毎日「今すぐ」を送って連続記録を伸ばそう！"
             ))
         )
         print(f"ℹ️ [{timestamp}] Help menu sent")
@@ -1323,14 +1288,9 @@ print("=" * 70 + "\n")
 
 init_database()
 
-# スケジューラースレッドを起動
-scheduler_thread = threading.Thread(target=schedule_checker, daemon=True)
-scheduler_thread.start()
-
 startup_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 print(f"\n{'=' * 70}")
 print(f"✅ Bot initialized at {startup_time}")
-print(f"✅ Scheduler thread started")
 print(f"{'=' * 70}\n")
 
 if __name__ == "__main__":
