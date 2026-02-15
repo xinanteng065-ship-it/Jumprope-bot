@@ -9,7 +9,7 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from openai import OpenAI
 
 app = Flask(__name__)
-
+ 
 # ==========================================
 # 環境変数の読み込み
 # ==========================================
