@@ -853,9 +853,25 @@ def index():
 
 @app.route("/ranking")
 def ranking():
-    """ランキングページ - 落ち着いたデザイン"""
-    ranking_data = get_ranking_data()
+    """ランキングページ - スマホ最適化 & ページネーション対応"""
+    # ページ番号の取得 (デフォルトは1)
+    try:
+        page = int(request.args.get('page', 1))
+    except ValueError:
+        page = 1
     
+    per_page = 10  # 1ページあたりの表示人数
+    ranking_data = get_ranking_data()
+    total_count = len(ranking_data)
+    
+    # ページネーション用のスライス
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    paginated_data = ranking_data[start_idx:end_idx]
+    
+    # 総ページ数
+    total_pages = (total_count + per_page - 1) // per_page
+
     html = """<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -863,264 +879,99 @@ def ranking():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>連続記録ランキング - なわ太コーチ</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
-            background: #f5f7fa;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            text-align: center;
-            color: #2c3e50;
-            margin-bottom: 40px;
-            padding-top: 20px;
-        }
-        
-        .header h1 {
-            font-size: 28px;
-            font-weight: 600;
-            margin-bottom: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f0f2f5;
             color: #1a202c;
+            padding: 15px;
+            line-height: 1.5;
         }
+        .container { max-width: 600px; margin: 0 auto; }
         
-        .header p {
-            font-size: 14px;
-            color: #718096;
-        }
-        
-        .refresh-container {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        
-        .refresh-btn {
-            background: #4a5568;
-            color: white;
-            border: none;
-            padding: 10px 24px;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s ease;
-        }
-        
-        .refresh-btn:hover {
-            background: #2d3748;
-        }
-        
-        .refresh-btn:active {
-            transform: scale(0.98);
-        }
-        
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { font-size: 22px; margin-bottom: 5px; }
+        .header p { font-size: 12px; color: #718096; }
+
+        /* 表彰台の修整: スマホでも横並び */
         .podium {
             display: flex;
             justify-content: center;
             align-items: flex-end;
-            gap: 12px;
-            margin-bottom: 40px;
+            gap: 8px;
+            margin-bottom: 25px;
+            padding: 0 5px;
         }
-        
         .podium-item {
             background: white;
-            border-radius: 12px;
-            padding: 20px 16px;
+            border-radius: 10px;
+            padding: 10px 5px;
             text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            border: 1px solid #e2e8f0;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            flex: 1;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border-bottom: 4px solid #e2e8f0;
+            min-width: 0; /* 文字溢れ防止 */
         }
+        .podium-1 { border-color: #f59e0b; order: 2; transform: scale(1.05); z-index: 2; }
+        .podium-2 { border-color: #9ca3af; order: 1; }
+        .podium-3 { border-color: #cd7f32; order: 3; }
         
-        .podium-item:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-        }
-        
-        .podium-1 {
-            order: 2;
-            width: 160px;
-            border-top: 3px solid #f59e0b;
-        }
-        
-        .podium-2 {
-            order: 1;
-            width: 140px;
-            border-top: 3px solid #9ca3af;
-        }
-        
-        .podium-3 {
-            order: 3;
-            width: 140px;
-            border-top: 3px solid #cd7f32;
-        }
-        
-        .medal {
-            font-size: 36px;
-            margin-bottom: 8px;
-            display: block;
-        }
-        
-        .podium-nickname {
-            font-size: 14px;
-            font-weight: 600;
-            color: #2d3748;
-            margin-bottom: 8px;
-            word-break: break-word;
-            line-height: 1.4;
-        }
-        
-        .podium-streak {
-            font-size: 24px;
-            font-weight: 700;
-            color: #1a202c;
-            margin-bottom: 4px;
-        }
-        
-        .podium-label {
-            font-size: 12px;
-            color: #718096;
-        }
-        
+        .medal { font-size: 24px; display: block; margin-bottom: 2px; }
+        .podium-nickname { font-size: 11px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .podium-streak { font-size: 20px; font-weight: 800; color: #2d3748; }
+        .podium-label { font-size: 10px; color: #718096; }
+
+        /* リストの修整: 縦幅を節約 */
         .ranking-list {
             background: white;
             border-radius: 12px;
-            padding: 24px;
+            overflow: hidden;
             box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            border: 1px solid #e2e8f0;
         }
-        
         .ranking-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #1a202c;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 2px solid #e2e8f0;
+            background: #4a5568;
+            color: white;
+            padding: 10px 15px;
+            font-size: 14px;
+            font-weight: bold;
         }
-        
         .ranking-item {
             display: flex;
             align-items: center;
-            padding: 14px 12px;
-            border-bottom: 1px solid #f7fafc;
-            transition: background 0.2s ease;
+            padding: 10px 15px;
+            border-bottom: 1px solid #edf2f7;
         }
-        
-        .ranking-item:hover {
-            background: #f7fafc;
-            border-radius: 8px;
+        .rank-number { width: 30px; font-weight: bold; color: #718096; font-size: 14px; }
+        .user-info { flex: 1; min-width: 0; }
+        .user-nickname { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .user-level { font-size: 11px; color: #a0aec0; }
+        .streak-badge { background: #fff5f5; color: #e53e3e; padding: 4px 10px; border-radius: 12px; font-size: 13px; font-weight: bold; white-space: nowrap; }
+
+        /* ページネーション */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-top: 20px;
+            padding-bottom: 30px;
         }
-        
-        .ranking-item:last-child {
-            border-bottom: none;
-        }
-        
-        .rank-number {
-            font-size: 16px;
-            font-weight: 700;
-            width: 40px;
-            text-align: center;
+        .page-btn {
+            text-decoration: none;
+            background: white;
             color: #4a5568;
-        }
-        
-        .user-info {
-            flex: 1;
-            padding: 0 16px;
-        }
-        
-        .user-nickname {
-            font-size: 13px;
-            font-weight: 600;
-            color: #2d3748;
-            margin-bottom: 2px;
-        }
-        
-        .user-level {
-            font-size: 11px;
-            color: #a0aec0;
-        }
-        
-        .streak-badge {
-            background: #edf2f7;
-            color: #2d3748;
-            padding: 6px 14px;
-            border-radius: 16px;
-            font-size: 13px;
-            font-weight: 600;
-        }
-        
-        .fire-emoji {
-            margin-right: 2px;
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #a0aec0;
-        }
-        
-        .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
-        
-        .empty-state h3 {
-            font-size: 18px;
-            color: #4a5568;
-            margin-bottom: 8px;
-        }
-        
-        .empty-state p {
+            padding: 8px 16px;
+            border-radius: 6px;
             font-size: 14px;
+            font-weight: bold;
+            border: 1px solid #e2e8f0;
         }
-        
-        @media (max-width: 600px) {
-            .header h1 {
-                font-size: 24px;
-            }
-            
-            .podium {
-                flex-direction: column;
-                align-items: center;
-            }
-            
-            .podium-item {
-                width: 100% !important;
-                max-width: 280px;
-            }
-            
-            .podium-1 {
-                order: 1;
-            }
-            
-            .podium-2 {
-                order: 2;
-            }
-            
-            .podium-3 {
-                order: 3;
-            }
-            
-            .user-nickname {
-                font-size: 12px;
-            }
-            
-            .podium-nickname {
-                font-size: 13px;
-            }
+        .page-btn.disabled { opacity: 0.3; pointer-events: none; }
+        .page-info { font-size: 14px; color: #4a5568; }
+
+        @media (max-width: 400px) {
+            .podium-streak { font-size: 18px; }
+            .medal { font-size: 20px; }
         }
     </style>
 </head>
@@ -1128,11 +979,7 @@ def ranking():
     <div class="container">
         <div class="header">
             <h1>🔥 連続記録ランキング</h1>
-            <p>なわ太コーチ - 毎日練習を続けているユーザー</p>
-        </div>
-        
-        <div class="refresh-container">
-            <button class="refresh-btn" onclick="location.reload()">🔄 最新に更新</button>
+            <p>1位を目指して毎日跳ぼう！</p>
         </div>
         
         {% if ranking_data|length >= 3 %}
@@ -1159,35 +1006,40 @@ def ranking():
         {% endif %}
         
         <div class="ranking-list">
-            <div class="ranking-title">全ユーザーランキング</div>
-            {% if ranking_data|length > 0 %}
-                {% for user in ranking_data %}
+            <div class="ranking-title">全ユーザー ({{ start_idx + 1 }}〜{{ start_idx + paginated_data|length }}位)</div>
+            {% if paginated_data|length > 0 %}
+                {% for user in paginated_data %}
                 <div class="ranking-item">
-                    <div class="rank-number">{{ loop.index }}</div>
+                    <div class="rank-number">{{ start_idx + loop.index }}</div>
                     <div class="user-info">
                         <div class="user-nickname">{{ user['nickname'] }}</div>
                         <div class="user-level">{{ user['level'] }}</div>
                     </div>
-                    <div class="streak-badge">
-                        <span class="fire-emoji">🔥</span>{{ user['streak_days'] }}日
-                    </div>
+                    <div class="streak-badge">🔥 {{ user['streak_days'] }}日</div>
                 </div>
                 {% endfor %}
             {% else %}
-                <div class="empty-state">
-                    <div class="empty-state-icon">📊</div>
-                    <h3>まだランキングデータがありません</h3>
-                    <p>連続記録を達成したユーザーがここに表示されます</p>
-                </div>
+                <div style="text-align:center; padding: 40px; color: #a0aec0;">データがありません</div>
             {% endif %}
+        </div>
+
+        {% if total_pages > 1 %}
+        <div class="pagination">
+            <a href="?page={{ page - 1 }}" class="page-btn {{ 'disabled' if page == 1 }}">前へ</a>
+            <span class="page-info">{{ page }} / {{ total_pages }}</span>
+            <a href="?page={{ page + 1 }}" class="page-btn {{ 'disabled' if page == total_pages }}">次へ</a>
+        </div>
+        {% endif %}
+        
+        <div style="text-align: center; margin-top: 10px;">
+            <button onclick="location.reload()" style="background:none; border:none; color:#718096; font-size:12px; cursor:pointer;">🔄 データを更新</button>
         </div>
     </div>
 </body>
 </html>
 """
+    return render_template_string(html, ranking_data=ranking_data, paginated_data=paginated_data, page=page, total_pages=total_pages, start_idx=start_idx)
     
-    return render_template_string(html, ranking_data=ranking_data)
-
 @app.route("/settings", methods=['GET', 'POST'])
 def settings():
     """設定画面 - ニックネーム設定追加"""
