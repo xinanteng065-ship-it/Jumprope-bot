@@ -23,9 +23,6 @@ APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://jumprope-bot.onrender
 BOOTH_SUPPORT_URL = "https://visai.booth.pm/items/7763380"
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
 
-# ★ オリジナルスタンプの画像URL（後で設定）
-WELCOME_STAMP_URL = os.environ.get("WELCOME_STAMP_URL", "https://example.com/welcome_stamp.png")
-
 if not all([LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, OPENAI_API_KEY]):
     raise ValueError("🚨 必要な環境変数が設定されていません")
 
@@ -34,7 +31,14 @@ webhook_handler = WebhookHandler(LINE_CHANNEL_SECRET)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 JST = timezone('Asia/Tokyo')
-DB_PATH = os.path.join(os.path.dirname(__file__), "rope_users.db")
+
+# データベースパス（永続化対応）
+# Renderの場合は /data ディレクトリを使用
+if os.path.exists('/data'):
+    DB_PATH = '/data/rope_users.db'
+else:
+    # ローカル開発環境
+    DB_PATH = os.path.join(os.path.dirname(__file__), "rope_users.db")
 
 # レベル設定
 USER_LEVELS = {
@@ -722,7 +726,7 @@ TS系:
                 100: {
                     "duration": "75秒",
                     "target": "10点超え",
-                    "message": "🎊100日達成おめでとう！！🎊 最高の演技で有終の美を飾ろう！"
+                    "message": "🎊100日達成おめでとう！！🎊 最高峰の演技で有終の美を飾ろう！"
                 }
             }
             
@@ -788,10 +792,7 @@ def create_challenge_message(user_id, level):
 
         increment_delivery_count(user_id, challenge)
 
-        # 連続記録を先頭に追加
-        streak_message = f"🔥 連続記録: {streak_days}日目！\n\n"
-        
-        return streak_message + challenge
+        return challenge
     except Exception as e:
         print(f"❌ create_challenge_message error: {e}")
         return "今日のお題：\n前とび30秒を安定させてみよう！"
@@ -805,8 +806,17 @@ def get_ranking_data():
         conn = get_db()
         cursor = conn.cursor()
         
+        # user_idでグループ化して重複を防ぐ
+        # ニックネームが空文字列の場合も'名無しのジャンパー'として扱う
         cursor.execute('''
-            SELECT nickname, streak_days, level, last_challenge_date
+            SELECT 
+                CASE 
+                    WHEN nickname IS NULL OR nickname = '' THEN '名無しのジャンパー'
+                    ELSE nickname
+                END as display_nickname,
+                streak_days, 
+                level, 
+                last_challenge_date
             FROM users
             WHERE streak_days > 0
             ORDER BY streak_days DESC, last_challenge_date DESC
@@ -819,7 +829,7 @@ def get_ranking_data():
         ranking = []
         for row in rows:
             ranking.append({
-                'nickname': row['nickname'] or '名無しのジャンパー',
+                'nickname': row['display_nickname'],
                 'streak_days': row['streak_days'],
                 'level': row['level'],
                 'last_challenge_date': row['last_challenge_date']
@@ -886,6 +896,40 @@ def ranking():
             .header p {
                 font-size: 18px;
                 opacity: 0.9;
+            }
+            
+            .refresh-container {
+                text-align: center;
+                margin-bottom: 20px;
+            }
+            
+            .refresh-btn {
+                background: white;
+                color: #667eea;
+                border: none;
+                padding: 12px 30px;
+                border-radius: 25px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                box-shadow: 0 4px 15px rgba(255, 255, 255, 0.3);
+                transition: all 0.3s ease;
+            }
+            
+            .refresh-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(255, 255, 255, 0.4);
+            }
+            
+            .refresh-btn:active {
+                transform: translateY(0);
+            }
+            
+            .countdown {
+                color: white;
+                font-size: 14px;
+                margin-top: 10px;
+                opacity: 0.8;
             }
             
             .podium {
@@ -1146,6 +1190,11 @@ def ranking():
                 <p>なわ太コーチ - 毎日続けているユーザーたち</p>
             </div>
             
+            <div class="refresh-container">
+                <button class="refresh-btn" onclick="location.reload()">🔄 最新に更新</button>
+                <div class="countdown">次の自動更新まで: <span id="countdown">30</span>秒</div>
+            </div>
+            
             {% if ranking_data|length >= 3 %}
             <div class="podium">
                 <div class="podium-item podium-2">
@@ -1267,6 +1316,20 @@ def ranking():
             window.addEventListener('load', () => {
                 setTimeout(createConfetti, 500);
             });
+            
+            // カウントダウンタイマー
+            let countdown = 30;
+            const countdownElement = document.getElementById('countdown');
+            
+            setInterval(() => {
+                countdown--;
+                if (countdownElement) {
+                    countdownElement.textContent = countdown;
+                }
+                if (countdown <= 0) {
+                    location.reload();
+                }
+            }, 1000);
         </script>
     </body>
     </html>
@@ -1780,7 +1843,7 @@ def handle_message(event):
                 support_message = (
                     "いつも練習お疲れ様です！🙏\n\n"
                     "このなわ太コーチは個人開発で、サーバー代やAI利用料を自腹で運営しています。\n\n"
-                    "もし応援していただけるなら、300円の応援PDFをBoothに置いています。\n"
+                    "もし応援していただけるなら、100円の応援PDFをBoothに置いています。\n"
                     "無理はしないでください🙏\n\n"
                     f"↓応援はこちらから\n{BOOTH_SUPPORT_URL}"
                 )
