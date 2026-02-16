@@ -23,6 +23,9 @@ APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://jumprope-bot.onrender
 BOOTH_SUPPORT_URL = "https://visai.booth.pm/items/7763380"
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
 
+# ★ オリジナルスタンプの画像URL（後で設定）
+WELCOME_STAMP_URL = os.environ.get("WELCOME_STAMP_URL", "https://example.com/welcome_stamp.png")
+
 if not all([LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, OPENAI_API_KEY]):
     raise ValueError("🚨 必要な環境変数が設定されていません")
 
@@ -792,6 +795,7 @@ def create_challenge_message(user_id, level):
 
         increment_delivery_count(user_id, challenge)
 
+        # 連続記録のメッセージは削除
         return challenge
     except Exception as e:
         print(f"❌ create_challenge_message error: {e}")
@@ -850,490 +854,338 @@ def index():
 
 @app.route("/ranking")
 def ranking():
-    """ランキングページ - 快感を覚えるデザイン"""
+    """ランキングページ - 落ち着いたデザイン"""
     ranking_data = get_ranking_data()
     
-    html = """
-    <!DOCTYPE html>
-    <html lang="ja">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🔥 連続記録ランキング - なわ太コーチ</title>
-        <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                padding: 20px;
-                overflow-x: hidden;
-            }
-            
-            .container {
-                max-width: 800px;
-                margin: 0 auto;
-            }
-            
-            .header {
-                text-align: center;
-                color: white;
-                margin-bottom: 40px;
-                animation: fadeInDown 0.6s ease-out;
-            }
-            
+    html = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>連続記録ランキング - なわ太コーチ</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 40px;
+            padding-top: 20px;
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #1a202c;
+        }
+        
+        .header p {
+            font-size: 14px;
+            color: #718096;
+        }
+        
+        .refresh-container {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .refresh-btn {
+            background: #4a5568;
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        
+        .refresh-btn:hover {
+            background: #2d3748;
+        }
+        
+        .refresh-btn:active {
+            transform: scale(0.98);
+        }
+        
+        .podium {
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            gap: 12px;
+            margin-bottom: 40px;
+        }
+        
+        .podium-item {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 16px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .podium-item:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+        
+        .podium-1 {
+            order: 2;
+            width: 160px;
+            border-top: 3px solid #f59e0b;
+        }
+        
+        .podium-2 {
+            order: 1;
+            width: 140px;
+            border-top: 3px solid #9ca3af;
+        }
+        
+        .podium-3 {
+            order: 3;
+            width: 140px;
+            border-top: 3px solid #cd7f32;
+        }
+        
+        .medal {
+            font-size: 36px;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        .podium-nickname {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 8px;
+            word-break: break-word;
+            line-height: 1.4;
+        }
+        
+        .podium-streak {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+        
+        .podium-label {
+            font-size: 12px;
+            color: #718096;
+        }
+        
+        .ranking-list {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+        }
+        
+        .ranking-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .ranking-item {
+            display: flex;
+            align-items: center;
+            padding: 14px 12px;
+            border-bottom: 1px solid #f7fafc;
+            transition: background 0.2s ease;
+        }
+        
+        .ranking-item:hover {
+            background: #f7fafc;
+            border-radius: 8px;
+        }
+        
+        .ranking-item:last-child {
+            border-bottom: none;
+        }
+        
+        .rank-number {
+            font-size: 16px;
+            font-weight: 700;
+            width: 40px;
+            text-align: center;
+            color: #4a5568;
+        }
+        
+        .user-info {
+            flex: 1;
+            padding: 0 16px;
+        }
+        
+        .user-nickname {
+            font-size: 13px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 2px;
+        }
+        
+        .user-level {
+            font-size: 11px;
+            color: #a0aec0;
+        }
+        
+        .streak-badge {
+            background: #edf2f7;
+            color: #2d3748;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        
+        .fire-emoji {
+            margin-right: 2px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #a0aec0;
+        }
+        
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        
+        .empty-state h3 {
+            font-size: 18px;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+        
+        .empty-state p {
+            font-size: 14px;
+        }
+        
+        @media (max-width: 600px) {
             .header h1 {
-                font-size: 42px;
-                margin-bottom: 10px;
-                text-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            }
-            
-            .header p {
-                font-size: 18px;
-                opacity: 0.9;
-            }
-            
-            .refresh-container {
-                text-align: center;
-                margin-bottom: 20px;
-            }
-            
-            .refresh-btn {
-                background: white;
-                color: #667eea;
-                border: none;
-                padding: 12px 30px;
-                border-radius: 25px;
-                font-size: 16px;
-                font-weight: 600;
-                cursor: pointer;
-                box-shadow: 0 4px 15px rgba(255, 255, 255, 0.3);
-                transition: all 0.3s ease;
-            }
-            
-            .refresh-btn:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(255, 255, 255, 0.4);
-            }
-            
-            .refresh-btn:active {
-                transform: translateY(0);
-            }
-            
-            .countdown {
-                color: white;
-                font-size: 14px;
-                margin-top: 10px;
-                opacity: 0.8;
+                font-size: 24px;
             }
             
             .podium {
-                display: flex;
-                justify-content: center;
-                align-items: flex-end;
-                gap: 15px;
-                margin-bottom: 50px;
-                animation: fadeInUp 0.8s ease-out;
+                flex-direction: column;
+                align-items: center;
             }
             
             .podium-item {
-                background: white;
-                border-radius: 16px;
-                padding: 20px;
-                text-align: center;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-                transition: all 0.3s ease;
-                cursor: pointer;
-            }
-            
-            .podium-item:hover {
-                transform: translateY(-10px) scale(1.05);
-                box-shadow: 0 15px 50px rgba(0,0,0,0.4);
+                width: 100% !important;
+                max-width: 280px;
             }
             
             .podium-1 {
-                order: 2;
-                width: 180px;
-                background: linear-gradient(135deg, #FFD700, #FFA500);
-                color: white;
-                animation: pulse 2s ease-in-out infinite;
+                order: 1;
             }
             
             .podium-2 {
-                order: 1;
-                width: 160px;
-                background: linear-gradient(135deg, #C0C0C0, #A8A8A8);
-                color: white;
+                order: 2;
             }
             
             .podium-3 {
                 order: 3;
-                width: 160px;
-                background: linear-gradient(135deg, #CD7F32, #B8860B);
-                color: white;
-            }
-            
-            .medal {
-                font-size: 50px;
-                margin-bottom: 10px;
-                display: block;
-                animation: rotate 3s ease-in-out infinite;
-            }
-            
-            .podium-nickname {
-                font-size: 18px;
-                font-weight: 600;
-                margin-bottom: 8px;
-                word-break: break-word;
-            }
-            
-            .podium-streak {
-                font-size: 32px;
-                font-weight: 800;
-                margin-bottom: 5px;
-            }
-            
-            .podium-label {
-                font-size: 13px;
-                opacity: 0.9;
-            }
-            
-            .ranking-list {
-                background: white;
-                border-radius: 20px;
-                padding: 30px;
-                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-                animation: fadeInUp 1s ease-out;
-            }
-            
-            .ranking-item {
-                display: flex;
-                align-items: center;
-                padding: 18px;
-                border-bottom: 1px solid #f0f0f0;
-                transition: all 0.3s ease;
-                animation: slideInRight 0.5s ease-out backwards;
-            }
-            
-            .ranking-item:nth-child(1) { animation-delay: 0.1s; }
-            .ranking-item:nth-child(2) { animation-delay: 0.15s; }
-            .ranking-item:nth-child(3) { animation-delay: 0.2s; }
-            .ranking-item:nth-child(4) { animation-delay: 0.25s; }
-            .ranking-item:nth-child(5) { animation-delay: 0.3s; }
-            
-            .ranking-item:hover {
-                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-                transform: translateX(5px);
-                border-radius: 12px;
-            }
-            
-            .ranking-item:last-child {
-                border-bottom: none;
-            }
-            
-            .rank-number {
-                font-size: 24px;
-                font-weight: 800;
-                width: 50px;
-                text-align: center;
-                color: #667eea;
-            }
-            
-            .user-info {
-                flex: 1;
-                padding: 0 20px;
             }
             
             .user-nickname {
-                font-size: 18px;
-                font-weight: 600;
-                color: #2c3e50;
-                margin-bottom: 4px;
+                font-size: 12px;
             }
             
-            .user-level {
+            .podium-nickname {
                 font-size: 13px;
-                color: #7f8c8d;
             }
-            
-            .streak-badge {
-                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                color: white;
-                padding: 10px 20px;
-                border-radius: 25px;
-                font-size: 20px;
-                font-weight: 700;
-                box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
-            }
-            
-            .fire-emoji {
-                display: inline-block;
-                animation: fire-flicker 1.5s ease-in-out infinite;
-            }
-            
-            .empty-state {
-                text-align: center;
-                padding: 60px 20px;
-                color: #7f8c8d;
-            }
-            
-            .empty-state-icon {
-                font-size: 80px;
-                margin-bottom: 20px;
-                opacity: 0.5;
-            }
-            
-            @keyframes fadeInDown {
-                from {
-                    opacity: 0;
-                    transform: translateY(-30px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
-            }
-            
-            @keyframes fadeInUp {
-                from {
-                    opacity: 0;
-                    transform: translateY(30px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
-            }
-            
-            @keyframes slideInRight {
-                from {
-                    opacity: 0;
-                    transform: translateX(-50px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-            }
-            
-            @keyframes pulse {
-                0%, 100% {
-                    transform: scale(1);
-                }
-                50% {
-                    transform: scale(1.05);
-                }
-            }
-            
-            @keyframes rotate {
-                0%, 100% {
-                    transform: rotate(0deg);
-                }
-                25% {
-                    transform: rotate(-10deg);
-                }
-                75% {
-                    transform: rotate(10deg);
-                }
-            }
-            
-            @keyframes fire-flicker {
-                0%, 100% {
-                    transform: scale(1) rotate(0deg);
-                }
-                25% {
-                    transform: scale(1.1) rotate(-5deg);
-                }
-                75% {
-                    transform: scale(1.1) rotate(5deg);
-                }
-            }
-            
-            @media (max-width: 600px) {
-                .header h1 {
-                    font-size: 32px;
-                }
-                
-                .podium {
-                    flex-direction: column;
-                    align-items: center;
-                }
-                
-                .podium-item {
-                    width: 100% !important;
-                    max-width: 300px;
-                }
-                
-                .podium-1 {
-                    order: 1;
-                }
-                
-                .podium-2 {
-                    order: 2;
-                }
-                
-                .podium-3 {
-                    order: 3;
-                }
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1><span class="fire-emoji">🔥</span> 連続記録ランキング</h1>
-                <p>なわ太コーチ - 毎日続けているユーザーたち</p>
-            </div>
-            
-            <div class="refresh-container">
-                <button class="refresh-btn" onclick="location.reload()">🔄 最新に更新</button>
-                <div class="countdown">次の自動更新まで: <span id="countdown">30</span>秒</div>
-            </div>
-            
-            {% if ranking_data|length >= 3 %}
-            <div class="podium">
-                <div class="podium-item podium-2">
-                    <span class="medal">🥈</span>
-                    <div class="podium-nickname">{{ ranking_data[1]['nickname'] }}</div>
-                    <div class="podium-streak">{{ ranking_data[1]['streak_days'] }}</div>
-                    <div class="podium-label">日連続</div>
-                </div>
-                <div class="podium-item podium-1">
-                    <span class="medal">🥇</span>
-                    <div class="podium-nickname">{{ ranking_data[0]['nickname'] }}</div>
-                    <div class="podium-streak">{{ ranking_data[0]['streak_days'] }}</div>
-                    <div class="podium-label">日連続</div>
-                </div>
-                <div class="podium-item podium-3">
-                    <span class="medal">🥉</span>
-                    <div class="podium-nickname">{{ ranking_data[2]['nickname'] }}</div>
-                    <div class="podium-streak">{{ ranking_data[2]['streak_days'] }}</div>
-                    <div class="podium-label">日連続</div>
-                </div>
-            </div>
-            {% endif %}
-            
-            <div class="ranking-list">
-                {% if ranking_data|length > 0 %}
-                    {% for user in ranking_data %}
-                    <div class="ranking-item">
-                        <div class="rank-number">{{ loop.index }}</div>
-                        <div class="user-info">
-                            <div class="user-nickname">{{ user['nickname'] }}</div>
-                            <div class="user-level">{{ user['level'] }}</div>
-                        </div>
-                        <div class="streak-badge">
-                            <span class="fire-emoji">🔥</span> {{ user['streak_days'] }}日
-                        </div>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📊</div>
-                        <h3>まだランキングデータがありません</h3>
-                        <p>連続記録を達成したユーザーがここに表示されます！</p>
-                    </div>
-                {% endif %}
-            </div>
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 連続記録ランキング</h1>
+            <p>なわ太コーチ - 毎日練習を続けているユーザー</p>
         </div>
         
-        <script>
-            // 快感を覚える効果音（クリック時）
-            document.querySelectorAll('.ranking-item, .podium-item').forEach(item => {
-                item.addEventListener('click', function() {
-                    // 視覚効果
-                    this.style.transform = 'scale(0.95)';
-                    setTimeout(() => {
-                        this.style.transform = '';
-                    }, 100);
-                    
-                    // 簡易的な音（WebAudio API）
-                    try {
-                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                        const oscillator = audioContext.createOscillator();
-                        const gainNode = audioContext.createGain();
-                        
-                        oscillator.connect(gainNode);
-                        gainNode.connect(audioContext.destination);
-                        
-                        oscillator.frequency.value = 800;
-                        oscillator.type = 'sine';
-                        
-                        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
-                        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
-                        
-                        oscillator.start(audioContext.currentTime);
-                        oscillator.stop(audioContext.currentTime + 0.1);
-                    } catch(e) {
-                        console.log('Audio not supported');
-                    }
-                });
-            });
-            
-            // ランダムな紙吹雪効果（トップ3に）
-            function createConfetti() {
-                const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'];
-                const confettiCount = 50;
-                
-                for (let i = 0; i < confettiCount; i++) {
-                    setTimeout(() => {
-                        const confetti = document.createElement('div');
-                        confetti.style.position = 'fixed';
-                        confetti.style.width = '10px';
-                        confetti.style.height = '10px';
-                        confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
-                        confetti.style.left = Math.random() * window.innerWidth + 'px';
-                        confetti.style.top = '-10px';
-                        confetti.style.borderRadius = '50%';
-                        confetti.style.pointerEvents = 'none';
-                        confetti.style.zIndex = '9999';
-                        confetti.style.opacity = '0.8';
-                        
-                        document.body.appendChild(confetti);
-                        
-                        const duration = 3000 + Math.random() * 2000;
-                        const rotation = Math.random() * 360;
-                        
-                        confetti.animate([
-                            { transform: 'translateY(0) rotate(0deg)', opacity: 0.8 },
-                            { transform: `translateY(${window.innerHeight + 20}px) rotate(${rotation}deg)`, opacity: 0 }
-                        ], {
-                            duration: duration,
-                            easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
-                        });
-                        
-                        setTimeout(() => confetti.remove(), duration);
-                    }, i * 30);
-                }
-            }
-            
-            // ページロード時に紙吹雪
-            window.addEventListener('load', () => {
-                setTimeout(createConfetti, 500);
-            });
-            
-            // カウントダウンタイマー
-            let countdown = 30;
-            const countdownElement = document.getElementById('countdown');
-            
-            setInterval(() => {
-                countdown--;
-                if (countdownElement) {
-                    countdownElement.textContent = countdown;
-                }
-                if (countdown <= 0) {
-                    location.reload();
-                }
-            }, 1000);
-        </script>
-    </body>
-    </html>
-    """
+        <div class="refresh-container">
+            <button class="refresh-btn" onclick="location.reload()">🔄 最新に更新</button>
+        </div>
+        
+        {% if ranking_data|length >= 3 %}
+        <div class="podium">
+            <div class="podium-item podium-2">
+                <span class="medal">🥈</span>
+                <div class="podium-nickname">{{ ranking_data[1]['nickname'] }}</div>
+                <div class="podium-streak">{{ ranking_data[1]['streak_days'] }}</div>
+                <div class="podium-label">日連続</div>
+            </div>
+            <div class="podium-item podium-1">
+                <span class="medal">🥇</span>
+                <div class="podium-nickname">{{ ranking_data[0]['nickname'] }}</div>
+                <div class="podium-streak">{{ ranking_data[0]['streak_days'] }}</div>
+                <div class="podium-label">日連続</div>
+            </div>
+            <div class="podium-item podium-3">
+                <span class="medal">🥉</span>
+                <div class="podium-nickname">{{ ranking_data[2]['nickname'] }}</div>
+                <div class="podium-streak">{{ ranking_data[2]['streak_days'] }}</div>
+                <div class="podium-label">日連続</div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="ranking-list">
+            <div class="ranking-title">全ユーザーランキング</div>
+            {% if ranking_data|length > 0 %}
+                {% for user in ranking_data %}
+                <div class="ranking-item">
+                    <div class="rank-number">{{ loop.index }}</div>
+                    <div class="user-info">
+                        <div class="user-nickname">{{ user['nickname'] }}</div>
+                        <div class="user-level">{{ user['level'] }}</div>
+                    </div>
+                    <div class="streak-badge">
+                        <span class="fire-emoji">🔥</span>{{ user['streak_days'] }}日
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <div class="empty-state-icon">📊</div>
+                    <h3>まだランキングデータがありません</h3>
+                    <p>連続記録を達成したユーザーがここに表示されます</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
+"""
     
     return render_template_string(html, ranking_data=ranking_data)
 
@@ -1391,9 +1243,9 @@ def settings():
             print(f"   User ID: {user_id[:8]}...")
             print(f"   Form data: level={new_level}, personality={new_personality}, nickname={new_nickname}")
 
-            # ニックネームの長さ制限（20文字まで）
-            if new_nickname and len(new_nickname) > 20:
-                new_nickname = new_nickname[:20]
+            # ニックネームの長さ制限（10文字まで）
+            if new_nickname and len(new_nickname) > 10:
+                new_nickname = new_nickname[:10]
 
             update_user_settings(user_id, level=new_level, coach_personality=new_personality, nickname=new_nickname)
 
@@ -1653,8 +1505,8 @@ def settings():
                             <span class="label-icon">👤</span>
                             ニックネーム（ランキング表示用）
                         </label>
-                        <input type="text" name="nickname" value="{current_nickname}" maxlength="20" placeholder="例: ジャンプ太郎">
-                        <div class="nickname-hint">※ランキングに表示されます（20文字まで）</div>
+                        <input type="text" name="nickname" value="{current_nickname}" maxlength="10" placeholder="例: ジャンプ太郎">
+                        <div class="nickname-hint">※ランキングに表示されます（10文字まで）</div>
                     </div>
                     <div class="divider"></div>
                     <div class="form-group">
@@ -1724,7 +1576,8 @@ def handle_message(event):
         settings = get_user_settings(user_id)
         if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ", "できた", "難しかった", "友だちに紹介する", "ランキング"]:
             welcome_text = (
-                "こんにちは！なわ太コーチです！\n\n"
+                "Jumprope-botです！\n\n"
+                "こんにちは！なわたコーチです！\n\n"
                 "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
                 "📝 まずは設定から始めましょう：\n"
                 "「設定」と送信して、レベル・コーチの性格・ニックネームを設定してください。\n\n"
