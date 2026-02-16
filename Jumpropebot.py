@@ -2,14 +2,17 @@ import os
 import sqlite3
 from datetime import datetime
 from pytz import timezone
-from flask import Flask, request, abort, render_template_string
+from flask import Flask, request, abort, render_template_string, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import (
+    MessageEvent, TextMessage, TextSendMessage, 
+    FollowEvent, ImageSendMessage
+)
 from openai import OpenAI
 
 app = Flask(__name__)
- 
+
 # ==========================================
 # 環境変数の読み込み
 # ==========================================
@@ -19,6 +22,9 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://jumprope-bot.onrender.com")
 BOOTH_SUPPORT_URL = "https://visai.booth.pm/items/7763380"
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
+
+# ★ オリジナルスタンプの画像URL（後で設定）
+WELCOME_STAMP_URL = os.environ.get("WELCOME_STAMP_URL", "https://example.com/welcome_stamp.png")
 
 if not all([LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, OPENAI_API_KEY]):
     raise ValueError("🚨 必要な環境変数が設定されていません")
@@ -70,6 +76,7 @@ def init_database():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id TEXT PRIMARY KEY,
+                nickname TEXT,
                 level TEXT NOT NULL DEFAULT '初心者',
                 coach_personality TEXT NOT NULL DEFAULT '優しい',
                 delivery_count INTEGER DEFAULT 0,
@@ -80,12 +87,14 @@ def init_database():
                 immediate_request_count INTEGER DEFAULT 0,
                 last_immediate_request_date TEXT,
                 streak_days INTEGER DEFAULT 0,
-                last_challenge_date TEXT
+                last_challenge_date TEXT,
+                received_welcome_stamp INTEGER DEFAULT 0
             )
         ''')
 
         # 既存テーブルへのカラム追加（必要に応じて）
         columns_to_add = [
+            ("nickname", "TEXT"),
             ("last_challenge", "TEXT"),
             ("success_count", "INTEGER DEFAULT 0"),
             ("difficulty_count", "INTEGER DEFAULT 0"),
@@ -93,7 +102,8 @@ def init_database():
             ("immediate_request_count", "INTEGER DEFAULT 0"),
             ("last_immediate_request_date", "TEXT"),
             ("streak_days", "INTEGER DEFAULT 0"),
-            ("last_challenge_date", "TEXT")
+            ("last_challenge_date", "TEXT"),
+            ("received_welcome_stamp", "INTEGER DEFAULT 0")
         ]
 
         for column_name, column_type in columns_to_add:
@@ -119,8 +129,9 @@ def get_user_settings(user_id):
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT level, coach_personality, delivery_count, success_count, 
-                   difficulty_count, support_shown, last_challenge, streak_days, last_challenge_date 
+            SELECT level, nickname, coach_personality, delivery_count, success_count, 
+                   difficulty_count, support_shown, last_challenge, streak_days, 
+                   last_challenge_date, received_welcome_stamp
             FROM users WHERE user_id = ?
         ''', (user_id,))
         row = cursor.fetchone()
@@ -128,20 +139,22 @@ def get_user_settings(user_id):
         if not row:
             cursor.execute('''
                 INSERT INTO users (user_id, level, coach_personality, delivery_count, 
-                                 success_count, difficulty_count, support_shown, streak_days) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (user_id, '初心者', '優しい', 0, 0, 0, 0, 0))
+                                 success_count, difficulty_count, support_shown, streak_days,
+                                 received_welcome_stamp) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, '初心者', '優しい', 0, 0, 0, 0, 0, 0))
             conn.commit()
             conn.close()
             return {
-                'level': '初心者', 'coach_personality': '優しい',
+                'level': '初心者', 'nickname': None, 'coach_personality': '優しい',
                 'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0, 
                 'support_shown': 0, 'last_challenge': None, 'streak_days': 0,
-                'last_challenge_date': None
+                'last_challenge_date': None, 'received_welcome_stamp': 0
             }
 
         result = {
             'level': row['level'],
+            'nickname': row['nickname'] if 'nickname' in row.keys() else None,
             'coach_personality': row['coach_personality'] if 'coach_personality' in row.keys() else '優しい',
             'delivery_count': row['delivery_count'],
             'success_count': row['success_count'],
@@ -149,7 +162,8 @@ def get_user_settings(user_id):
             'support_shown': row['support_shown'],
             'last_challenge': row['last_challenge'],
             'streak_days': row['streak_days'] if 'streak_days' in row.keys() else 0,
-            'last_challenge_date': row['last_challenge_date'] if 'last_challenge_date' in row.keys() else None
+            'last_challenge_date': row['last_challenge_date'] if 'last_challenge_date' in row.keys() else None,
+            'received_welcome_stamp': row['received_welcome_stamp'] if 'received_welcome_stamp' in row.keys() else 0
         }
 
         conn.close()
@@ -158,32 +172,46 @@ def get_user_settings(user_id):
     except Exception as e:
         print(f"❌ get_user_settings error: {e}")
         return {
-            'level': '初心者', 'coach_personality': '優しい',
+            'level': '初心者', 'nickname': None, 'coach_personality': '優しい',
             'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0,
             'support_shown': 0, 'last_challenge': None, 'streak_days': 0,
-            'last_challenge_date': None
+            'last_challenge_date': None, 'received_welcome_stamp': 0
         }
 
 # ==========================================
 # ユーザー設定の更新
 # ==========================================
-def update_user_settings(user_id, level, coach_personality='優しい'):
-    """レベル、コーチの性格を更新"""
+def update_user_settings(user_id, level=None, coach_personality=None, nickname=None):
+    """レベル、コーチの性格、ニックネームを更新"""
     try:
         conn = get_db()
         cursor = conn.cursor()
 
         print(f"🔧 Updating settings for {user_id[:8]}...")
-        print(f"   Level: '{level}', Personality: '{coach_personality}'")
 
-        cursor.execute('''
-            INSERT INTO users (user_id, level, coach_personality, delivery_count, 
-                             success_count, difficulty_count, support_shown, streak_days)
-            VALUES (?, ?, ?, 0, 0, 0, 0, 0)
-            ON CONFLICT(user_id) DO UPDATE SET
-                level = excluded.level,
-                coach_personality = excluded.coach_personality
-        ''', (user_id, level, coach_personality))
+        # 現在の設定を取得
+        cursor.execute('SELECT level, coach_personality, nickname FROM users WHERE user_id = ?', (user_id,))
+        row = cursor.fetchone()
+
+        if row:
+            # 既存ユーザー: 指定されたフィールドのみ更新
+            current_level = level if level is not None else row['level']
+            current_personality = coach_personality if coach_personality is not None else row['coach_personality']
+            current_nickname = nickname if nickname is not None else row['nickname']
+
+            cursor.execute('''
+                UPDATE users 
+                SET level = ?, coach_personality = ?, nickname = ?
+                WHERE user_id = ?
+            ''', (current_level, current_personality, current_nickname, user_id))
+        else:
+            # 新規ユーザー
+            cursor.execute('''
+                INSERT INTO users (user_id, level, coach_personality, nickname, delivery_count, 
+                                 success_count, difficulty_count, support_shown, streak_days,
+                                 received_welcome_stamp)
+                VALUES (?, ?, ?, ?, 0, 0, 0, 0, 0, 0)
+            ''', (user_id, level or '初心者', coach_personality or '優しい', nickname))
 
         conn.commit()
         conn.close()
@@ -310,6 +338,20 @@ def mark_support_shown(user_id):
         conn.close()
     except Exception as e:
         print(f"❌ mark_support_shown error: {e}")
+
+# ==========================================
+# ウェルカムスタンプ送信済みフラグ
+# ==========================================
+def mark_welcome_stamp_sent(user_id):
+    """ウェルカムスタンプを送信済みにする"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE users SET received_welcome_stamp = 1 WHERE user_id = ?', (user_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"❌ mark_welcome_stamp_sent error: {e}")
 
 # ==========================================
 # AI課題生成（IJRU対応）
@@ -680,7 +722,7 @@ TS系:
                 100: {
                     "duration": "75秒",
                     "target": "10点超え",
-                    "message": "🎊100日達成おめでとう！！🎊 最高峰の演技で有終の美を飾ろう！"
+                    "message": "🎊100日達成おめでとう！！🎊 最高の演技で有終の美を飾ろう！"
                 }
             }
             
@@ -755,6 +797,40 @@ def create_challenge_message(user_id, level):
         return "今日のお題：\n前とび30秒を安定させてみよう！"
 
 # ==========================================
+# ランキングデータ取得
+# ==========================================
+def get_ranking_data():
+    """全ユーザーのランキングデータを取得"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT nickname, streak_days, level, last_challenge_date
+            FROM users
+            WHERE streak_days > 0
+            ORDER BY streak_days DESC, last_challenge_date DESC
+            LIMIT 100
+        ''')
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        ranking = []
+        for row in rows:
+            ranking.append({
+                'nickname': row['nickname'] or '名無しのジャンパー',
+                'streak_days': row['streak_days'],
+                'level': row['level'],
+                'last_challenge_date': row['last_challenge_date']
+            })
+        
+        return ranking
+    except Exception as e:
+        print(f"❌ get_ranking_data error: {e}")
+        return []
+
+# ==========================================
 # Flask Routes
 # ==========================================
 @app.route("/")
@@ -762,9 +838,445 @@ def index():
     """ヘルスチェック用エンドポイント"""
     return "Jump Rope AI Coach Bot Running ✅"
 
+@app.route("/ranking")
+def ranking():
+    """ランキングページ - 快感を覚えるデザイン"""
+    ranking_data = get_ranking_data()
+    
+    html = """
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>🔥 連続記録ランキング - なわ太コーチ</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+                overflow-x: hidden;
+            }
+            
+            .container {
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            
+            .header {
+                text-align: center;
+                color: white;
+                margin-bottom: 40px;
+                animation: fadeInDown 0.6s ease-out;
+            }
+            
+            .header h1 {
+                font-size: 42px;
+                margin-bottom: 10px;
+                text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            }
+            
+            .header p {
+                font-size: 18px;
+                opacity: 0.9;
+            }
+            
+            .podium {
+                display: flex;
+                justify-content: center;
+                align-items: flex-end;
+                gap: 15px;
+                margin-bottom: 50px;
+                animation: fadeInUp 0.8s ease-out;
+            }
+            
+            .podium-item {
+                background: white;
+                border-radius: 16px;
+                padding: 20px;
+                text-align: center;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                transition: all 0.3s ease;
+                cursor: pointer;
+            }
+            
+            .podium-item:hover {
+                transform: translateY(-10px) scale(1.05);
+                box-shadow: 0 15px 50px rgba(0,0,0,0.4);
+            }
+            
+            .podium-1 {
+                order: 2;
+                width: 180px;
+                background: linear-gradient(135deg, #FFD700, #FFA500);
+                color: white;
+                animation: pulse 2s ease-in-out infinite;
+            }
+            
+            .podium-2 {
+                order: 1;
+                width: 160px;
+                background: linear-gradient(135deg, #C0C0C0, #A8A8A8);
+                color: white;
+            }
+            
+            .podium-3 {
+                order: 3;
+                width: 160px;
+                background: linear-gradient(135deg, #CD7F32, #B8860B);
+                color: white;
+            }
+            
+            .medal {
+                font-size: 50px;
+                margin-bottom: 10px;
+                display: block;
+                animation: rotate 3s ease-in-out infinite;
+            }
+            
+            .podium-nickname {
+                font-size: 18px;
+                font-weight: 600;
+                margin-bottom: 8px;
+                word-break: break-word;
+            }
+            
+            .podium-streak {
+                font-size: 32px;
+                font-weight: 800;
+                margin-bottom: 5px;
+            }
+            
+            .podium-label {
+                font-size: 13px;
+                opacity: 0.9;
+            }
+            
+            .ranking-list {
+                background: white;
+                border-radius: 20px;
+                padding: 30px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                animation: fadeInUp 1s ease-out;
+            }
+            
+            .ranking-item {
+                display: flex;
+                align-items: center;
+                padding: 18px;
+                border-bottom: 1px solid #f0f0f0;
+                transition: all 0.3s ease;
+                animation: slideInRight 0.5s ease-out backwards;
+            }
+            
+            .ranking-item:nth-child(1) { animation-delay: 0.1s; }
+            .ranking-item:nth-child(2) { animation-delay: 0.15s; }
+            .ranking-item:nth-child(3) { animation-delay: 0.2s; }
+            .ranking-item:nth-child(4) { animation-delay: 0.25s; }
+            .ranking-item:nth-child(5) { animation-delay: 0.3s; }
+            
+            .ranking-item:hover {
+                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                transform: translateX(5px);
+                border-radius: 12px;
+            }
+            
+            .ranking-item:last-child {
+                border-bottom: none;
+            }
+            
+            .rank-number {
+                font-size: 24px;
+                font-weight: 800;
+                width: 50px;
+                text-align: center;
+                color: #667eea;
+            }
+            
+            .user-info {
+                flex: 1;
+                padding: 0 20px;
+            }
+            
+            .user-nickname {
+                font-size: 18px;
+                font-weight: 600;
+                color: #2c3e50;
+                margin-bottom: 4px;
+            }
+            
+            .user-level {
+                font-size: 13px;
+                color: #7f8c8d;
+            }
+            
+            .streak-badge {
+                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                color: white;
+                padding: 10px 20px;
+                border-radius: 25px;
+                font-size: 20px;
+                font-weight: 700;
+                box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+            }
+            
+            .fire-emoji {
+                display: inline-block;
+                animation: fire-flicker 1.5s ease-in-out infinite;
+            }
+            
+            .empty-state {
+                text-align: center;
+                padding: 60px 20px;
+                color: #7f8c8d;
+            }
+            
+            .empty-state-icon {
+                font-size: 80px;
+                margin-bottom: 20px;
+                opacity: 0.5;
+            }
+            
+            @keyframes fadeInDown {
+                from {
+                    opacity: 0;
+                    transform: translateY(-30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            @keyframes fadeInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            @keyframes slideInRight {
+                from {
+                    opacity: 0;
+                    transform: translateX(-50px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateX(0);
+                }
+            }
+            
+            @keyframes pulse {
+                0%, 100% {
+                    transform: scale(1);
+                }
+                50% {
+                    transform: scale(1.05);
+                }
+            }
+            
+            @keyframes rotate {
+                0%, 100% {
+                    transform: rotate(0deg);
+                }
+                25% {
+                    transform: rotate(-10deg);
+                }
+                75% {
+                    transform: rotate(10deg);
+                }
+            }
+            
+            @keyframes fire-flicker {
+                0%, 100% {
+                    transform: scale(1) rotate(0deg);
+                }
+                25% {
+                    transform: scale(1.1) rotate(-5deg);
+                }
+                75% {
+                    transform: scale(1.1) rotate(5deg);
+                }
+            }
+            
+            @media (max-width: 600px) {
+                .header h1 {
+                    font-size: 32px;
+                }
+                
+                .podium {
+                    flex-direction: column;
+                    align-items: center;
+                }
+                
+                .podium-item {
+                    width: 100% !important;
+                    max-width: 300px;
+                }
+                
+                .podium-1 {
+                    order: 1;
+                }
+                
+                .podium-2 {
+                    order: 2;
+                }
+                
+                .podium-3 {
+                    order: 3;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1><span class="fire-emoji">🔥</span> 連続記録ランキング</h1>
+                <p>なわ太コーチ - 毎日続けているユーザーたち</p>
+            </div>
+            
+            {% if ranking_data|length >= 3 %}
+            <div class="podium">
+                <div class="podium-item podium-2">
+                    <span class="medal">🥈</span>
+                    <div class="podium-nickname">{{ ranking_data[1]['nickname'] }}</div>
+                    <div class="podium-streak">{{ ranking_data[1]['streak_days'] }}</div>
+                    <div class="podium-label">日連続</div>
+                </div>
+                <div class="podium-item podium-1">
+                    <span class="medal">🥇</span>
+                    <div class="podium-nickname">{{ ranking_data[0]['nickname'] }}</div>
+                    <div class="podium-streak">{{ ranking_data[0]['streak_days'] }}</div>
+                    <div class="podium-label">日連続</div>
+                </div>
+                <div class="podium-item podium-3">
+                    <span class="medal">🥉</span>
+                    <div class="podium-nickname">{{ ranking_data[2]['nickname'] }}</div>
+                    <div class="podium-streak">{{ ranking_data[2]['streak_days'] }}</div>
+                    <div class="podium-label">日連続</div>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="ranking-list">
+                {% if ranking_data|length > 0 %}
+                    {% for user in ranking_data %}
+                    <div class="ranking-item">
+                        <div class="rank-number">{{ loop.index }}</div>
+                        <div class="user-info">
+                            <div class="user-nickname">{{ user['nickname'] }}</div>
+                            <div class="user-level">{{ user['level'] }}</div>
+                        </div>
+                        <div class="streak-badge">
+                            <span class="fire-emoji">🔥</span> {{ user['streak_days'] }}日
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📊</div>
+                        <h3>まだランキングデータがありません</h3>
+                        <p>連続記録を達成したユーザーがここに表示されます！</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <script>
+            // 快感を覚える効果音（クリック時）
+            document.querySelectorAll('.ranking-item, .podium-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    // 視覚効果
+                    this.style.transform = 'scale(0.95)';
+                    setTimeout(() => {
+                        this.style.transform = '';
+                    }, 100);
+                    
+                    // 簡易的な音（WebAudio API）
+                    try {
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        const oscillator = audioContext.createOscillator();
+                        const gainNode = audioContext.createGain();
+                        
+                        oscillator.connect(gainNode);
+                        gainNode.connect(audioContext.destination);
+                        
+                        oscillator.frequency.value = 800;
+                        oscillator.type = 'sine';
+                        
+                        gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+                        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+                        
+                        oscillator.start(audioContext.currentTime);
+                        oscillator.stop(audioContext.currentTime + 0.1);
+                    } catch(e) {
+                        console.log('Audio not supported');
+                    }
+                });
+            });
+            
+            // ランダムな紙吹雪効果（トップ3に）
+            function createConfetti() {
+                const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A'];
+                const confettiCount = 50;
+                
+                for (let i = 0; i < confettiCount; i++) {
+                    setTimeout(() => {
+                        const confetti = document.createElement('div');
+                        confetti.style.position = 'fixed';
+                        confetti.style.width = '10px';
+                        confetti.style.height = '10px';
+                        confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                        confetti.style.left = Math.random() * window.innerWidth + 'px';
+                        confetti.style.top = '-10px';
+                        confetti.style.borderRadius = '50%';
+                        confetti.style.pointerEvents = 'none';
+                        confetti.style.zIndex = '9999';
+                        confetti.style.opacity = '0.8';
+                        
+                        document.body.appendChild(confetti);
+                        
+                        const duration = 3000 + Math.random() * 2000;
+                        const rotation = Math.random() * 360;
+                        
+                        confetti.animate([
+                            { transform: 'translateY(0) rotate(0deg)', opacity: 0.8 },
+                            { transform: `translateY(${window.innerHeight + 20}px) rotate(${rotation}deg)`, opacity: 0 }
+                        ], {
+                            duration: duration,
+                            easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                        });
+                        
+                        setTimeout(() => confetti.remove(), duration);
+                    }, i * 30);
+                }
+            }
+            
+            // ページロード時に紙吹雪
+            window.addEventListener('load', () => {
+                setTimeout(createConfetti, 500);
+            });
+        </script>
+    </body>
+    </html>
+    """
+    
+    return render_template_string(html, ranking_data=ranking_data)
+
 @app.route("/settings", methods=['GET', 'POST'])
 def settings():
-    """設定画面"""
+    """設定画面 - ニックネーム設定追加"""
     try:
         user_id = request.args.get('user_id')
 
@@ -809,15 +1321,22 @@ def settings():
         if request.method == 'POST':
             new_level = request.form.get('level')
             new_personality = request.form.get('coach_personality', '優しい')
+            new_nickname = request.form.get('nickname', '').strip()
 
             timestamp = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n⚙️ [{timestamp}] Settings update POST received")
             print(f"   User ID: {user_id[:8]}...")
-            print(f"   Form data: level={new_level}, personality={new_personality}")
+            print(f"   Form data: level={new_level}, personality={new_personality}, nickname={new_nickname}")
 
-            update_user_settings(user_id, new_level, new_personality)
+            # ニックネームの長さ制限（20文字まで）
+            if new_nickname and len(new_nickname) > 20:
+                new_nickname = new_nickname[:20]
 
-            return """
+            update_user_settings(user_id, level=new_level, coach_personality=new_personality, nickname=new_nickname)
+
+            ranking_url = f"{APP_PUBLIC_URL}/ranking"
+            
+            return f"""
             <!DOCTYPE html>
             <html>
             <head>
@@ -825,7 +1344,7 @@ def settings():
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>設定完了</title>
                 <style>
-                    body {
+                    body {{
                         font-family: -apple-system, sans-serif;
                         background: linear-gradient(135deg, #667eea, #764ba2);
                         min-height: 100vh;
@@ -833,8 +1352,8 @@ def settings():
                         align-items: center;
                         justify-content: center;
                         padding: 20px;
-                    }
-                    .container {
+                    }}
+                    .container {{
                         background: white;
                         padding: 50px 30px;
                         border-radius: 16px;
@@ -842,12 +1361,12 @@ def settings():
                         text-align: center;
                         max-width: 400px;
                         animation: slideIn 0.4s ease-out;
-                    }
-                    @keyframes slideIn {
-                        from { opacity: 0; transform: translateY(-20px); }
-                        to { opacity: 1; transform: translateY(0); }
-                    }
-                    .success-icon {
+                    }}
+                    @keyframes slideIn {{
+                        from {{ opacity: 0; transform: translateY(-20px); }}
+                        to {{ opacity: 1; transform: translateY(0); }}
+                    }}
+                    .success-icon {{
                         width: 80px;
                         height: 80px;
                         background: #00B900;
@@ -858,17 +1377,32 @@ def settings():
                         margin: 0 auto 25px;
                         font-size: 45px;
                         color: white;
-                    }
-                    h2 { color: #333; margin-bottom: 20px; font-size: 26px; }
-                    p { color: #666; font-size: 18px; line-height: 1.8; }
-                    .back-notice {
+                    }}
+                    h2 {{ color: #333; margin-bottom: 20px; font-size: 26px; }}
+                    p {{ color: #666; font-size: 18px; line-height: 1.8; }}
+                    .back-notice {{
                         margin-top: 30px;
                         padding: 15px;
                         background: #f8f9fa;
                         border-radius: 8px;
                         color: #555;
                         font-size: 15px;
-                    }
+                    }}
+                    .ranking-link {{
+                        display: inline-block;
+                        margin-top: 20px;
+                        padding: 12px 25px;
+                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        font-weight: 600;
+                        transition: all 0.3s ease;
+                    }}
+                    .ranking-link:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                    }}
                 </style>
             </head>
             <body>
@@ -876,6 +1410,7 @@ def settings():
                     <div class="success-icon">✓</div>
                     <h2>設定を保存しました！</h2>
                     <p>「今すぐ」と送信すると課題が届きます。</p>
+                    <a href="{ranking_url}" class="ranking-link">🔥 ランキングを見る</a>
                     <div class="back-notice">LINEの画面に戻ってください</div>
                 </div>
             </body>
@@ -883,6 +1418,7 @@ def settings():
             """
 
         current_settings = get_user_settings(user_id)
+        current_nickname = current_settings.get('nickname', '')
 
         # レベルのオプション生成
         level_options = ''
@@ -897,6 +1433,8 @@ def settings():
         for personality_name in COACH_PERSONALITIES:
             selected = 'selected' if personality_name == current_personality else ''
             personality_options += f'<option value="{personality_name}" {selected}>{personality_name}</option>'
+
+        ranking_url = f"{APP_PUBLIC_URL}/ranking"
 
         html = f"""
         <!DOCTYPE html>
@@ -962,7 +1500,7 @@ def settings():
                     margin-bottom: 10px;
                 }}
                 .label-icon {{ font-size: 18px; }}
-                select {{
+                select, input[type="text"] {{
                     width: 100%;
                     padding: 14px 16px;
                     font-size: 16px;
@@ -971,6 +1509,8 @@ def settings():
                     background-color: #f8f9fa;
                     transition: all 0.3s ease;
                     font-family: inherit;
+                }}
+                select {{
                     cursor: pointer;
                     appearance: none;
                     background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
@@ -979,11 +1519,16 @@ def settings():
                     background-size: 20px;
                     padding-right: 40px;
                 }}
-                select:focus {{
+                select:focus, input[type="text"]:focus {{
                     outline: none;
                     border-color: #667eea;
                     background-color: white;
                     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+                }}
+                .nickname-hint {{
+                    font-size: 12px;
+                    color: #7f8c8d;
+                    margin-top: 5px;
                 }}
                 button {{
                     width: 100%;
@@ -1010,6 +1555,22 @@ def settings():
                     background: linear-gradient(to right, transparent, #e0e0e0, transparent);
                     margin: 25px 0;
                 }}
+                .ranking-link {{
+                    display: block;
+                    text-align: center;
+                    margin-top: 15px;
+                    padding: 12px;
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    transition: all 0.3s ease;
+                }}
+                .ranking-link:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                }}
             </style>
         </head>
         <body>
@@ -1020,9 +1581,19 @@ def settings():
                     <p class="subtitle">レベルとコーチの性格を設定できます</p>
                 </div>
                 <div class="current-settings">
-                    現在の設定: <strong>{current_settings['level']}</strong>レベル（<strong>{current_personality}</strong>コーチ）
+                    現在の設定: <strong>{current_settings['level']}</strong>レベル（<strong>{current_personality}</strong>コーチ）<br>
+                    ニックネーム: <strong>{current_nickname or '未設定'}</strong>
                 </div>
                 <form method="POST">
+                    <div class="form-group">
+                        <label>
+                            <span class="label-icon">👤</span>
+                            ニックネーム（ランキング表示用）
+                        </label>
+                        <input type="text" name="nickname" value="{current_nickname}" maxlength="20" placeholder="例: ジャンプ太郎">
+                        <div class="nickname-hint">※ランキングに表示されます（20文字まで）</div>
+                    </div>
+                    <div class="divider"></div>
                     <div class="form-group">
                         <label>
                             <span class="label-icon">🎯</span>
@@ -1044,6 +1615,7 @@ def settings():
                     </div>
                     <button type="submit">💾 設定を保存する</button>
                 </form>
+                <a href="{ranking_url}" class="ranking-link">🔥 ランキングを見る</a>
             </div>
         </body>
         </html>
@@ -1087,13 +1659,12 @@ def handle_message(event):
 
         # 初回ユーザーチェック（配信回数が0の場合）
         settings = get_user_settings(user_id)
-        if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ", "できた", "難しかった", "友だちに紹介する"]:
+        if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ", "できた", "難しかった", "友だちに紹介する", "ランキング"]:
             welcome_text = (
-                "Jumprope-botです！\n\n"
-                "こんにちは！なわたコーチです！\n\n"
+                "こんにちは！なわ太コーチです！\n\n"
                 "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
                 "📝 まずは設定から始めましょう：\n"
-                "「設定」と送信して、レベル・コーチの性格を設定してください。\n\n"
+                "「設定」と送信して、レベル・コーチの性格・ニックネームを設定してください。\n\n"
                 "💡 または今すぐ試したい場合は：\n"
                 "「今すぐ」と送信してください！\n\n"
                 "【レベルについて】\n"
@@ -1117,12 +1688,25 @@ def handle_message(event):
             settings_url = f"{APP_PUBLIC_URL}/settings?user_id={user_id}"
             reply_text = (
                 "⚙️ 設定\n"
-                "以下のリンクからレベルとコーチの性格を変更できます。\n\n"
+                "以下のリンクからレベル、コーチの性格、ニックネームを変更できます。\n\n"
                 f"{settings_url}\n\n"
                 "※リンクを知っている人は誰でも設定を変更できてしまうため、他人に教えないでください。"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
             print(f"⚙️ [{timestamp}] Settings link sent")
+            return
+
+        # ランキングページへのリンクを送信
+        if text == "ランキング":
+            ranking_url = f"{APP_PUBLIC_URL}/ranking"
+            reply_text = (
+                "🔥 連続記録ランキング\n\n"
+                "全ユーザーの連続記録ランキングを見ることができます！\n\n"
+                f"{ranking_url}\n\n"
+                "💡 ニックネームは「設定」から変更できます。"
+            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"🏆 [{timestamp}] Ranking link sent")
             return
 
         # 今すぐ課題を配信（1日3回まで、replyで即座に返信）
@@ -1196,7 +1780,7 @@ def handle_message(event):
                 support_message = (
                     "いつも練習お疲れ様です！🙏\n\n"
                     "このなわ太コーチは個人開発で、サーバー代やAI利用料を自腹で運営しています。\n\n"
-                    "もし応援していただけるなら、100円の応援PDFをBoothに置いています。\n"
+                    "もし応援していただけるなら、300円の応援PDFをBoothに置いています。\n"
                     "無理はしないでください🙏\n\n"
                     f"↓応援はこちらから\n{BOOTH_SUPPORT_URL}"
                 )
@@ -1266,7 +1850,8 @@ def handle_message(event):
             TextSendMessage(text=(
                 "💡メニュー\n"
                 "・「今すぐ」: 今すぐ課題を受信（1日3回まで）\n"
-                "・「設定」: レベルやコーチの性格を変更\n"
+                "・「設定」: レベルやコーチの性格、ニックネームを変更\n"
+                "・「ランキング」: 連続記録ランキングを見る\n"
                 "・「できた」「難しかった」: フィードバック\n"
                 "・「友だちに紹介する」: 友だちに紹介\n\n"
                 "🔥 毎日「今すぐ」を送って連続記録を伸ばそう！"
