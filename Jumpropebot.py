@@ -413,8 +413,8 @@ def generate_challenge_with_ai(level, user_history, coach_personality, streak_da
 - 成功条件を明確にする（回数・秒数など）
 - 技の組み合わせパターンを工夫する
 - 前回と違う課題を出す
-- 段階的な難度上昇を意識する
-- 技だけでなく、励ましや応援のメッセージも入れる"""
+- 段階的な難度上昇を意識する（「できた」の数が増えれば文字数の長い技を少し増やすなど）
+- 技だけでなく、アドバイスや励まし、応援のメッセージも入れる"""
 
     # 実際の技リスト
     level_guidelines = {
@@ -587,13 +587,12 @@ TS系:
 - 「ロンダートから後ろ二重とびに挑戦」
 
 課題例:
-- 「SOOASを安定させて1回」
-- 「EBTJ → インバースEBTJ → KNTJ」
-- 「EBTJO → KNTJ」
-- 「EBTJ → KNTJ → EBTJCL」
-- 「三重リリースに挑戦」（週1の特別課題）
-- 「SSCL → SSTS」
-- 「ドンキーを室内で練習」（週1の特別課題）"""
+- 初めのうちは「KNTJを安定させて1回」など単発
+- 「できた」の回数が増えてきたら「EBTJ → インバースEBTJ」など2連続
+- さらに慣れてきたら「EBTJ → KNTJ → SOCL」など3連続
+- さらに慣れたら「インバースEBTJO → KNTJ → EBTJCL」など難易度の高い（文字列の長い）3連続
+- 「三重リリースに挑戦」（三日に一回程度の特別課題）
+- 「ドンキーを室内で練習」（三日に一回程度の特別課題）"""
     }
 
     # ユーザー履歴の分析（直近3回のフィードバックを重視）
@@ -1576,7 +1575,6 @@ def handle_message(event):
         settings = get_user_settings(user_id)
         if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ", "できた", "難しかった", "友だちに紹介する", "ランキング"]:
             welcome_text = (
-                "Jumprope-botです！\n\n"
                 "こんにちは！なわたコーチです！\n\n"
                 "このBotは毎日あなたのレベルに合った練習課題をお届けします。\n\n"
                 "📝 まずは設定から始めましょう：\n"
@@ -1692,7 +1690,7 @@ def handle_message(event):
             messages = [TextSendMessage(text=full_message)]
 
             # 応援メッセージ（10回配信後、1回だけ）
-            if settings['delivery_count'] >= 10 and settings['support_shown'] == 0:
+            if settings['delivery_count'] >= 3 and settings['support_shown'] == 0:
                 support_message = (
                     "いつも練習お疲れ様です！🙏\n\n"
                     "このなわ太コーチは個人開発で、サーバー代やAI利用料を自腹で運営しています。\n\n"
