@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from pytz import timezone
-from flask import Flask, request, abort, render_template_string
+from flask import Flask, request, abort, render_template_string, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
@@ -9,8 +9,7 @@ from linebot.models import (
     FollowEvent, ImageSendMessage
 )
 from openai import OpenAI
-import psycopg2
-import psycopg2.extras
+from supabase import create_client, Client
 
 app = Flask(__name__)
 
@@ -20,18 +19,25 @@ app = Flask(__name__)
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-DATABASE_URL = os.environ.get("DATABASE_URL")
 APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://jumprope-bot.onrender.com")
 BOOTH_SUPPORT_URL = "https://visai.booth.pm/items/7763380"
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")  # service_role キーを推奨（RLS回避のため）
+
+# ★ オリジナルスタンプの画像URL（後で設定）
 WELCOME_STAMP_URL = os.environ.get("WELCOME_STAMP_URL", "https://example.com/welcome_stamp.png")
 
 if not all([LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, OPENAI_API_KEY]):
-    raise ValueError("🚨 必要な環境変数が設定されていません")
+    raise ValueError("🚨 必要な環境変数が設定されていません（LINE / OpenAI）")
+
+if not all([SUPABASE_URL, SUPABASE_KEY]):
+    raise ValueError("🚨 必要な環境変数が設定されていません（Supabase）")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 webhook_handler = WebhookHandler(LINE_CHANNEL_SECRET)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 JST = timezone('Asia/Tokyo')
 
@@ -59,140 +65,151 @@ USER_LEVELS = {
 COACH_PERSONALITIES = ["熱血", "優しい", "厳しい", "フレンドリー", "冷静"]
 
 # ==========================================
-# データベース接続（PostgreSQL）
+# Supabase テーブル初期化
 # ==========================================
-def get_db():
-    """PostgreSQL接続を取得"""
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
-    return conn
-
-# ==========================================
-# データベース初期化
-# ==========================================
-def init_database():
-    """テーブルを作成"""
-    try:
-        conn = get_db()
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id TEXT PRIMARY KEY,
-                nickname TEXT,
-                level TEXT NOT NULL DEFAULT '初心者',
-                coach_personality TEXT NOT NULL DEFAULT '優しい',
-                delivery_count INTEGER DEFAULT 0,
-                success_count INTEGER DEFAULT 0,
-                difficulty_count INTEGER DEFAULT 0,
-                support_shown INTEGER DEFAULT 0,
-                last_challenge TEXT,
-                immediate_request_count INTEGER DEFAULT 0,
-                last_immediate_request_date TEXT,
-                streak_days INTEGER DEFAULT 0,
-                last_challenge_date TEXT,
-                received_welcome_stamp INTEGER DEFAULT 0
-            )
-        ''')
-
-        conn.commit()
-        conn.close()
-        print("✅ Database initialized")
-    except Exception as e:
-        print(f"❌ Database initialization error: {e}")
+# 以下のSQLをSupabaseのSQL Editorで実行してテーブルを作成してください:
+#
+# CREATE TABLE IF NOT EXISTS users (
+#     user_id TEXT PRIMARY KEY,
+#     nickname TEXT,
+#     level TEXT NOT NULL DEFAULT '初心者',
+#     coach_personality TEXT NOT NULL DEFAULT '優しい',
+#     delivery_count INTEGER DEFAULT 0,
+#     success_count INTEGER DEFAULT 0,
+#     difficulty_count INTEGER DEFAULT 0,
+#     support_shown INTEGER DEFAULT 0,
+#     last_challenge TEXT,
+#     immediate_request_count INTEGER DEFAULT 0,
+#     last_immediate_request_date TEXT,
+#     streak_days INTEGER DEFAULT 0,
+#     last_challenge_date TEXT,
+#     received_welcome_stamp INTEGER DEFAULT 0,
+#     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+#     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+# );
+#
+# -- updated_at を自動更新するトリガー（任意）
+# CREATE OR REPLACE FUNCTION update_updated_at_column()
+# RETURNS TRIGGER AS $$
+# BEGIN
+#     NEW.updated_at = NOW();
+#     RETURN NEW;
+# END;
+# $$ language 'plpgsql';
+#
+# CREATE TRIGGER update_users_updated_at
+#     BEFORE UPDATE ON users
+#     FOR EACH ROW
+#     EXECUTE FUNCTION update_updated_at_column();
 
 # ==========================================
 # ユーザー設定の取得
 # ==========================================
 def get_user_settings(user_id):
-    """ユーザー設定を取得"""
+    """ユーザー設定をSupabaseから取得"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
+        response = supabase.table("users").select(
+            "level, nickname, coach_personality, delivery_count, success_count, "
+            "difficulty_count, support_shown, last_challenge, streak_days, "
+            "last_challenge_date, received_welcome_stamp"
+        ).eq("user_id", user_id).execute()
 
-        cursor.execute('''
-            SELECT level, nickname, coach_personality, delivery_count, success_count, 
-                   difficulty_count, support_shown, last_challenge, streak_days, 
-                   last_challenge_date, received_welcome_stamp
-            FROM users WHERE user_id = %s
-        ''', (user_id,))
-        row = cursor.fetchone()
-
-        if not row:
-            cursor.execute('''
-                INSERT INTO users (user_id, level, coach_personality, delivery_count, 
-                                 success_count, difficulty_count, support_shown, streak_days,
-                                 received_welcome_stamp) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (user_id, '初心者', '優しい', 0, 0, 0, 0, 0, 0))
-            conn.commit()
-            conn.close()
+        if not response.data:
+            # 新規ユーザーを作成
+            new_user = {
+                "user_id": user_id,
+                "level": "初心者",
+                "coach_personality": "優しい",
+                "delivery_count": 0,
+                "success_count": 0,
+                "difficulty_count": 0,
+                "support_shown": 0,
+                "streak_days": 0,
+                "received_welcome_stamp": 0,
+            }
+            supabase.table("users").insert(new_user).execute()
             return {
-                'level': '初心者', 'nickname': None, 'coach_personality': '優しい',
-                'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0,
-                'support_shown': 0, 'last_challenge': None, 'streak_days': 0,
-                'last_challenge_date': None, 'received_welcome_stamp': 0
+                "level": "初心者",
+                "nickname": None,
+                "coach_personality": "優しい",
+                "delivery_count": 0,
+                "success_count": 0,
+                "difficulty_count": 0,
+                "support_shown": 0,
+                "last_challenge": None,
+                "streak_days": 0,
+                "last_challenge_date": None,
+                "received_welcome_stamp": 0,
             }
 
-        result = {
-            'level': row['level'],
-            'nickname': row['nickname'],
-            'coach_personality': row['coach_personality'] or '優しい',
-            'delivery_count': row['delivery_count'],
-            'success_count': row['success_count'],
-            'difficulty_count': row['difficulty_count'],
-            'support_shown': row['support_shown'],
-            'last_challenge': row['last_challenge'],
-            'streak_days': row['streak_days'] or 0,
-            'last_challenge_date': row['last_challenge_date'],
-            'received_welcome_stamp': row['received_welcome_stamp'] or 0
+        row = response.data[0]
+        return {
+            "level": row.get("level", "初心者"),
+            "nickname": row.get("nickname"),
+            "coach_personality": row.get("coach_personality", "優しい"),
+            "delivery_count": row.get("delivery_count", 0),
+            "success_count": row.get("success_count", 0),
+            "difficulty_count": row.get("difficulty_count", 0),
+            "support_shown": row.get("support_shown", 0),
+            "last_challenge": row.get("last_challenge"),
+            "streak_days": row.get("streak_days", 0),
+            "last_challenge_date": row.get("last_challenge_date"),
+            "received_welcome_stamp": row.get("received_welcome_stamp", 0),
         }
-
-        conn.close()
-        return result
 
     except Exception as e:
         print(f"❌ get_user_settings error: {e}")
         return {
-            'level': '初心者', 'nickname': None, 'coach_personality': '優しい',
-            'delivery_count': 0, 'success_count': 0, 'difficulty_count': 0,
-            'support_shown': 0, 'last_challenge': None, 'streak_days': 0,
-            'last_challenge_date': None, 'received_welcome_stamp': 0
+            "level": "初心者",
+            "nickname": None,
+            "coach_personality": "優しい",
+            "delivery_count": 0,
+            "success_count": 0,
+            "difficulty_count": 0,
+            "support_shown": 0,
+            "last_challenge": None,
+            "streak_days": 0,
+            "last_challenge_date": None,
+            "received_welcome_stamp": 0,
         }
 
 # ==========================================
 # ユーザー設定の更新
 # ==========================================
 def update_user_settings(user_id, level=None, coach_personality=None, nickname=None):
-    """レベル、コーチの性格、ニックネームを更新"""
+    """レベル、コーチの性格、ニックネームをSupabaseに更新"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-
         print(f"🔧 Updating settings for {user_id[:8]}...")
 
-        cursor.execute('SELECT level, coach_personality, nickname FROM users WHERE user_id = %s', (user_id,))
-        row = cursor.fetchone()
+        # 現在の設定を取得
+        response = supabase.table("users").select(
+            "level, coach_personality, nickname"
+        ).eq("user_id", user_id).execute()
 
-        if row:
-            current_level = level if level is not None else row['level']
-            current_personality = coach_personality if coach_personality is not None else row['coach_personality']
-            current_nickname = nickname if nickname is not None else row['nickname']
+        update_data = {}
 
-            cursor.execute('''
-                UPDATE users 
-                SET level = %s, coach_personality = %s, nickname = %s
-                WHERE user_id = %s
-            ''', (current_level, current_personality, current_nickname, user_id))
+        if response.data:
+            row = response.data[0]
+            update_data["level"] = level if level is not None else row.get("level", "初心者")
+            update_data["coach_personality"] = coach_personality if coach_personality is not None else row.get("coach_personality", "優しい")
+            update_data["nickname"] = nickname if nickname is not None else row.get("nickname")
+            supabase.table("users").update(update_data).eq("user_id", user_id).execute()
         else:
-            cursor.execute('''
-                INSERT INTO users (user_id, level, coach_personality, nickname, delivery_count, 
-                                 success_count, difficulty_count, support_shown, streak_days,
-                                 received_welcome_stamp)
-                VALUES (%s, %s, %s, %s, 0, 0, 0, 0, 0, 0)
-            ''', (user_id, level or '初心者', coach_personality or '優しい', nickname))
+            # 新規ユーザー
+            new_user = {
+                "user_id": user_id,
+                "level": level or "初心者",
+                "coach_personality": coach_personality or "優しい",
+                "nickname": nickname,
+                "delivery_count": 0,
+                "success_count": 0,
+                "difficulty_count": 0,
+                "support_shown": 0,
+                "streak_days": 0,
+                "received_welcome_stamp": 0,
+            }
+            supabase.table("users").insert(new_user).execute()
 
-        conn.commit()
-        conn.close()
         print(f"✅ Settings saved successfully")
 
     except Exception as e:
@@ -206,25 +223,23 @@ def update_user_settings(user_id, level=None, coach_personality=None, nickname=N
 def update_streak(user_id):
     """連続記録を更新（今日課題をもらった場合）"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
         today = datetime.now(JST).strftime("%Y-%m-%d")
 
-        cursor.execute('''
-            SELECT streak_days, last_challenge_date 
-            FROM users WHERE user_id = %s
-        ''', (user_id,))
-        row = cursor.fetchone()
+        response = supabase.table("users").select(
+            "streak_days, last_challenge_date"
+        ).eq("user_id", user_id).execute()
 
         current_streak = 0
         last_date = None
 
-        if row:
-            current_streak = row['streak_days'] or 0
-            last_date = row['last_challenge_date']
+        if response.data:
+            row = response.data[0]
+            current_streak = row.get("streak_days") or 0
+            last_date = row.get("last_challenge_date")
 
+        # 連続記録の判定
         if last_date == today:
-            conn.close()
+            # 今日すでに課題をもらっている場合は何もしない
             return current_streak
         elif last_date:
             last_dt = datetime.strptime(last_date, "%Y-%m-%d")
@@ -238,14 +253,10 @@ def update_streak(user_id):
         else:
             current_streak = 1
 
-        cursor.execute('''
-            UPDATE users 
-            SET streak_days = %s, last_challenge_date = %s
-            WHERE user_id = %s
-        ''', (current_streak, today, user_id))
-
-        conn.commit()
-        conn.close()
+        supabase.table("users").update({
+            "streak_days": current_streak,
+            "last_challenge_date": today,
+        }).eq("user_id", user_id).execute()
 
         print(f"✅ Streak updated: {current_streak} days for {user_id[:8]}...")
         return current_streak
@@ -260,18 +271,14 @@ def update_streak(user_id):
 def increment_delivery_count(user_id, challenge_text):
     """配信回数を1増やし、課題を記録"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            UPDATE users 
-            SET delivery_count = delivery_count + 1, 
-                last_challenge = %s 
-            WHERE user_id = %s
-        ''', (challenge_text, user_id))
-
-        conn.commit()
-        conn.close()
+        # まず現在の値を取得してインクリメント
+        response = supabase.table("users").select("delivery_count").eq("user_id", user_id).execute()
+        if response.data:
+            current_count = response.data[0].get("delivery_count", 0) or 0
+            supabase.table("users").update({
+                "delivery_count": current_count + 1,
+                "last_challenge": challenge_text,
+            }).eq("user_id", user_id).execute()
         print(f"✅ Delivery count incremented for {user_id[:8]}...")
     except Exception as e:
         print(f"❌ increment_delivery_count error: {e}")
@@ -282,16 +289,17 @@ def increment_delivery_count(user_id, challenge_text):
 def record_feedback(user_id, is_success):
     """ユーザーのフィードバックを記録（成功/難しかった）"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-
         if is_success:
-            cursor.execute('UPDATE users SET success_count = success_count + 1 WHERE user_id = %s', (user_id,))
+            response = supabase.table("users").select("success_count").eq("user_id", user_id).execute()
+            if response.data:
+                current = response.data[0].get("success_count", 0) or 0
+                supabase.table("users").update({"success_count": current + 1}).eq("user_id", user_id).execute()
         else:
-            cursor.execute('UPDATE users SET difficulty_count = difficulty_count + 1 WHERE user_id = %s', (user_id,))
+            response = supabase.table("users").select("difficulty_count").eq("user_id", user_id).execute()
+            if response.data:
+                current = response.data[0].get("difficulty_count", 0) or 0
+                supabase.table("users").update({"difficulty_count": current + 1}).eq("user_id", user_id).execute()
 
-        conn.commit()
-        conn.close()
         print(f"✅ Feedback recorded: {'success' if is_success else 'difficulty'}")
     except Exception as e:
         print(f"❌ record_feedback error: {e}")
@@ -302,11 +310,7 @@ def record_feedback(user_id, is_success):
 def mark_support_shown(user_id):
     """応援メッセージを表示済みにする"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET support_shown = 1 WHERE user_id = %s', (user_id,))
-        conn.commit()
-        conn.close()
+        supabase.table("users").update({"support_shown": 1}).eq("user_id", user_id).execute()
     except Exception as e:
         print(f"❌ mark_support_shown error: {e}")
 
@@ -316,11 +320,7 @@ def mark_support_shown(user_id):
 def mark_welcome_stamp_sent(user_id):
     """ウェルカムスタンプを送信済みにする"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET received_welcome_stamp = 1 WHERE user_id = %s', (user_id,))
-        conn.commit()
-        conn.close()
+        supabase.table("users").update({"received_welcome_stamp": 1}).eq("user_id", user_id).execute()
     except Exception as e:
         print(f"❌ mark_welcome_stamp_sent error: {e}")
 
@@ -647,6 +647,7 @@ TS系:
 - 「ロンダートから後ろOCLOに挑戦」"""
     }
 
+    # ユーザー履歴の分析
     success_rate = 0
     difficulty_rate = 0
 
@@ -665,6 +666,7 @@ TS系:
         else:
             adjustment = "ユーザーの状況は中間です。少しだけ難度を下げるか、同じレベルの別パターンを試してください。"
 
+    # 10日ごとの特別課題判定
     is_special_day = (streak_days > 0 and streak_days % 10 == 0 and streak_days <= 100)
 
     special_challenge_reminder = ""
@@ -721,18 +723,59 @@ TS系:
         )
         challenge_text = response.choices[0].message.content.strip()
 
+        # 10日ごとの特別課題（採点アプリ）
         if is_special_day and streak_days <= 100:
             special_challenges = {
-                10: {"duration": "15秒", "target": "3点超え", "message": "まずは15秒のフリースタイルを作ってみよう！"},
-                20: {"duration": "30秒", "target": "5点超え", "message": "少し長めの30秒に挑戦！技のバリエーションを増やそう！"},
-                30: {"duration": "30秒", "target": "6点超え", "message": "30秒で6点を目指そう！質を意識して！"},
-                40: {"duration": "45秒", "target": "7点超え", "message": "45秒のフリースタイル！構成力が試されるよ！"},
-                50: {"duration": "60秒", "target": "8点超え", "message": "1分間のフリースタイル！スタミナと技術の両立！"},
-                60: {"duration": "60秒", "target": "9点超え", "message": "1分で9点！大会レベルに近づいてきた！"},
-                70: {"duration": "75秒", "target": "9点超え", "message": "ついに大会と同じ75秒！本番さながらの緊張感を！"},
-                80: {"duration": "75秒", "target": "9.5点超え", "message": "75秒で9.5点！完成度を極めよう！"},
-                90: {"duration": "75秒", "target": "10点超え", "message": "10点の壁に挑戦！完璧な演技を目指して！"},
-                100: {"duration": "75秒", "target": "10点超え", "message": "🎊100日達成おめでとう！！🎊 最高峰の演技で有終の美を飾ろう！"}
+                10: {
+                    "duration": "15秒",
+                    "target": "3点超え",
+                    "message": "まずは15秒のフリースタイルを作ってみよう！"
+                },
+                20: {
+                    "duration": "30秒",
+                    "target": "5点超え",
+                    "message": "少し長めの30秒に挑戦！技のバリエーションを増やそう！"
+                },
+                30: {
+                    "duration": "30秒",
+                    "target": "6点超え",
+                    "message": "30秒で6点を目指そう！質を意識して！"
+                },
+                40: {
+                    "duration": "45秒",
+                    "target": "7点超え",
+                    "message": "45秒のフリースタイル！構成力が試されるよ！"
+                },
+                50: {
+                    "duration": "60秒",
+                    "target": "8点超え",
+                    "message": "1分間のフリースタイル！スタミナと技術の両立！"
+                },
+                60: {
+                    "duration": "60秒",
+                    "target": "9点超え",
+                    "message": "1分で9点！大会レベルに近づいてきた！"
+                },
+                70: {
+                    "duration": "75秒",
+                    "target": "9点超え",
+                    "message": "ついに大会と同じ75秒！本番さながらの緊張感を！"
+                },
+                80: {
+                    "duration": "75秒",
+                    "target": "9.5点超え",
+                    "message": "75秒で9.5点！完成度を極めよう！"
+                },
+                90: {
+                    "duration": "75秒",
+                    "target": "10点超え",
+                    "message": "10点の壁に挑戦！完璧な演技を目指して！"
+                },
+                100: {
+                    "duration": "75秒",
+                    "target": "10点超え",
+                    "message": "🎊100日達成おめでとう！！🎊 最高峰の演技で有終の美を飾ろう！"
+                }
             }
 
             challenge_info = special_challenges.get(streak_days)
@@ -757,31 +800,31 @@ TS系:
                 "初心者": "今日のお題：\n三重とび3回連続！\n\n絶対いけるぞ！お前の力を信じてる！💪🔥",
                 "中級者": "今日のお題：\nEBTJ → KNTJ！\n\nやってやろうぜ！全力でぶつかれ！🔥",
                 "上級者": "今日のお題：\nSOOAS → SOOCL！\n\nお前ならできる！限界突破だ！✨💪",
-                "超上級者": "今日のお題：\nEBTJOO → KNTJCL！\n\nお前ならできる！限界突破だ！✨💪"
+                "超上級者": "今日のお題：\nEBTJOO → KNTJCL！\n\nお前の限界はここじゃないぞ！🔥💪"
             },
             "優しい": {
                 "初心者": "今日のお題：\n三重とびを3回連続。\n\nゆっくりでいいので、焦らず練習しましょうね😊",
                 "中級者": "今日のお題：\nEBTJを5回。\n\n無理しないでくださいね。少しずつ上達していきましょう💪",
                 "上級者": "今日のお題：\nSOOASを1回。\n\n質を大切に、丁寧に練習してみてください✨",
-                "超上級者": "今日のお題：\nEBTJOを1回。\n\n質を大切に、丁寧に練習してみてください✨"
+                "超上級者": "今日のお題：\nEBTJOOを1回。\n\n焦らず、丁寧に練習しましょうね✨"
             },
             "厳しい": {
                 "初心者": "今日のお題：\n三重とび5回連続。\n\nできて当然だ。甘えるな。",
                 "中級者": "今日のお題：\nKNTJ → インバースKNTJ。\n\n妥協するな。完璧を目指せ。",
                 "上級者": "今日のお題：\nSOOAS → SOOTS。\n\nできるまでやれ。結果が全てだ。",
-                "超上級者": "今日のお題：\nEBTJOO → KNTJOO。\n\nできるまでやれ。結果が全てだ。"
+                "超上級者": "今日のお題：\nEBTJOO → KNTJCL。\n\n限界を超えろ。それがお前の仕事だ。"
             },
             "フレンドリー": {
                 "初心者": "今日のお題：\n三重とび3回連続いってみよ！\n\n楽しくやろ！一緒に頑張ろ！✨😊",
                 "中級者": "今日のお題：\nEBTJ → KNTJ やろ！\n\n一緒に頑張ろ！絶対できるって！💪",
                 "上級者": "今日のお題：\nSOOASいい感じで決めちゃお！\n\nお前ならいけるって！信じてる！🔥",
-                "超上級者": "今日のお題：\nEBTJOOいい感じで決めちゃお！\n\nお前ならいけるって！信じてる！🔥"
+                "超上級者": "今日のお題：\nEBTJOO → KNTJCL！\n\n一緒にガチでやろ！絶対いけるって！🔥"
             },
             "冷静": {
                 "初心者": "今日のお題：\n三重とび3回。\n\n安定性を重視して、効率的な動作を心がけてください。",
                 "中級者": "今日のお題：\nEBTJ 5回。\n\n動作の効率性を分析しながら練習してください。",
                 "上級者": "今日のお題：\nSOOAS 1回。\n\n質を分析し、データ的に最適な動作を目指してください。",
-                "超上級者": "今日のお題：\nEBTJO 1回。\n\n質を分析し、データ的に最適な動作を目指してください。"
+                "超上級者": "今日のお題：\nEBTJOO 1回。\n\n動作を論理的に分析し、効率的な練習を継続してください。"
             }
         }
         personality_fallback = fallback_by_personality.get(coach_personality, fallback_by_personality["優しい"])
@@ -794,6 +837,7 @@ def create_challenge_message(user_id, level):
         settings = get_user_settings(user_id)
         coach_personality = settings.get('coach_personality', '優しい')
 
+        # 連続記録を更新
         streak_days = update_streak(user_id)
 
         challenge = generate_challenge_with_ai(level, settings, coach_personality, streak_days)
@@ -809,36 +853,24 @@ def create_challenge_message(user_id, level):
 # ランキングデータ取得
 # ==========================================
 def get_ranking_data():
-    """全ユーザーのランキングデータを取得"""
+    """全ユーザーのランキングデータをSupabaseから取得"""
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-
-        cursor.execute('''
-            SELECT 
-                CASE 
-                    WHEN nickname IS NULL OR nickname = '' THEN '名無しのジャンパー'
-                    ELSE nickname
-                END as display_nickname,
-                streak_days, 
-                level, 
-                last_challenge_date
-            FROM users
-            WHERE streak_days > 0
-            ORDER BY streak_days DESC, last_challenge_date DESC
-            LIMIT 100
-        ''')
-
-        rows = cursor.fetchall()
-        conn.close()
+        response = supabase.table("users").select(
+            "nickname, streak_days, level, last_challenge_date"
+        ).gt("streak_days", 0).order("streak_days", desc=True).order(
+            "last_challenge_date", desc=True
+        ).limit(100).execute()
 
         ranking = []
-        for row in rows:
+        for row in response.data:
+            nickname = row.get("nickname")
+            if not nickname or nickname.strip() == "":
+                nickname = "名無しのジャンパー"
             ranking.append({
-                'nickname': row['display_nickname'],
-                'streak_days': row['streak_days'],
-                'level': row['level'],
-                'last_challenge_date': row['last_challenge_date']
+                "nickname": nickname,
+                "streak_days": row.get("streak_days", 0),
+                "level": row.get("level", "初心者"),
+                "last_challenge_date": row.get("last_challenge_date"),
             })
 
         return ranking
@@ -851,10 +883,12 @@ def get_ranking_data():
 # ==========================================
 @app.route("/")
 def index():
+    """ヘルスチェック用エンドポイント"""
     return "Jump Rope AI Coach Bot Running ✅"
 
 @app.route("/ranking")
 def ranking():
+    """ランキングページ - 落ち着いたデザイン"""
     ranking_data = get_ranking_data()
 
     html = """<!DOCTYPE html>
@@ -864,57 +898,264 @@ def ranking():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>連続記録ランキング - なわ太コーチ</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
             background: #f5f7fa;
             min-height: 100vh;
             padding: 20px;
         }
-        .container { max-width: 800px; margin: 0 auto; }
-        .header { text-align: center; color: #2c3e50; margin-bottom: 40px; padding-top: 20px; }
-        .header h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; color: #1a202c; }
-        .header p { font-size: 14px; color: #718096; }
-        .refresh-container { text-align: center; margin-bottom: 30px; }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 40px;
+            padding-top: 20px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #1a202c;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #718096;
+        }
+
+        .refresh-container {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
         .refresh-btn {
-            background: #4a5568; color: white; border: none;
-            padding: 10px 24px; border-radius: 6px; font-size: 14px;
-            font-weight: 500; cursor: pointer; transition: background 0.2s ease;
+            background: #4a5568;
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s ease;
         }
-        .refresh-btn:hover { background: #2d3748; }
-        .podium { display: flex; justify-content: center; align-items: flex-end; gap: 12px; margin-bottom: 40px; }
+
+        .refresh-btn:hover {
+            background: #2d3748;
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.98);
+        }
+
+        .podium {
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            gap: 12px;
+            margin-bottom: 40px;
+        }
+
         .podium-item {
-            background: white; border-radius: 12px; padding: 20px 16px;
-            text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            border: 1px solid #e2e8f0; transition: transform 0.2s ease, box-shadow 0.2s ease;
+            background: white;
+            border-radius: 12px;
+            padding: 20px 16px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-        .podium-item:hover { transform: translateY(-4px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
-        .podium-1 { order: 2; width: 160px; border-top: 3px solid #f59e0b; }
-        .podium-2 { order: 1; width: 140px; border-top: 3px solid #9ca3af; }
-        .podium-3 { order: 3; width: 140px; border-top: 3px solid #cd7f32; }
-        .medal { font-size: 36px; margin-bottom: 8px; display: block; }
-        .podium-nickname { font-size: 14px; font-weight: 600; color: #2d3748; margin-bottom: 8px; word-break: break-word; line-height: 1.4; }
-        .podium-streak { font-size: 24px; font-weight: 700; color: #1a202c; margin-bottom: 4px; }
-        .podium-label { font-size: 12px; color: #718096; }
-        .ranking-list { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
-        .ranking-title { font-size: 18px; font-weight: 600; color: #1a202c; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #e2e8f0; }
-        .ranking-item { display: flex; align-items: center; padding: 14px 12px; border-bottom: 1px solid #f7fafc; transition: background 0.2s ease; }
-        .ranking-item:hover { background: #f7fafc; border-radius: 8px; }
-        .ranking-item:last-child { border-bottom: none; }
-        .rank-number { font-size: 16px; font-weight: 700; width: 40px; text-align: center; color: #4a5568; }
-        .user-info { flex: 1; padding: 0 16px; }
-        .user-nickname { font-size: 13px; font-weight: 600; color: #2d3748; margin-bottom: 2px; }
-        .user-level { font-size: 11px; color: #a0aec0; }
-        .streak-badge { background: #edf2f7; color: #2d3748; padding: 6px 14px; border-radius: 16px; font-size: 13px; font-weight: 600; }
-        .empty-state { text-align: center; padding: 60px 20px; color: #a0aec0; }
-        .empty-state-icon { font-size: 64px; margin-bottom: 16px; opacity: 0.5; }
-        .empty-state h3 { font-size: 18px; color: #4a5568; margin-bottom: 8px; }
-        .empty-state p { font-size: 14px; }
+
+        .podium-item:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+
+        .podium-1 {
+            order: 2;
+            width: 160px;
+            border-top: 3px solid #f59e0b;
+        }
+
+        .podium-2 {
+            order: 1;
+            width: 140px;
+            border-top: 3px solid #9ca3af;
+        }
+
+        .podium-3 {
+            order: 3;
+            width: 140px;
+            border-top: 3px solid #cd7f32;
+        }
+
+        .medal {
+            font-size: 36px;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .podium-nickname {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 8px;
+            word-break: break-word;
+            line-height: 1.4;
+        }
+
+        .podium-streak {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 4px;
+        }
+
+        .podium-label {
+            font-size: 12px;
+            color: #718096;
+        }
+
+        .ranking-list {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+        }
+
+        .ranking-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .ranking-item {
+            display: flex;
+            align-items: center;
+            padding: 14px 12px;
+            border-bottom: 1px solid #f7fafc;
+            transition: background 0.2s ease;
+        }
+
+        .ranking-item:hover {
+            background: #f7fafc;
+            border-radius: 8px;
+        }
+
+        .ranking-item:last-child {
+            border-bottom: none;
+        }
+
+        .rank-number {
+            font-size: 16px;
+            font-weight: 700;
+            width: 40px;
+            text-align: center;
+            color: #4a5568;
+        }
+
+        .user-info {
+            flex: 1;
+            padding: 0 16px;
+        }
+
+        .user-nickname {
+            font-size: 13px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 2px;
+        }
+
+        .user-level {
+            font-size: 11px;
+            color: #a0aec0;
+        }
+
+        .streak-badge {
+            background: #edf2f7;
+            color: #2d3748;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .fire-emoji {
+            margin-right: 2px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #a0aec0;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            font-size: 18px;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
         @media (max-width: 600px) {
-            .header h1 { font-size: 24px; }
-            .podium { flex-direction: column; align-items: center; }
-            .podium-item { width: 100% !important; max-width: 280px; }
-            .podium-1 { order: 1; } .podium-2 { order: 2; } .podium-3 { order: 3; }
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .podium {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .podium-item {
+                width: 100% !important;
+                max-width: 280px;
+            }
+
+            .podium-1 {
+                order: 1;
+            }
+
+            .podium-2 {
+                order: 2;
+            }
+
+            .podium-3 {
+                order: 3;
+            }
+
+            .user-nickname {
+                font-size: 12px;
+            }
+
+            .podium-nickname {
+                font-size: 13px;
+            }
         }
     </style>
 </head>
@@ -924,9 +1165,11 @@ def ranking():
             <h1>🔥 連続記録ランキング</h1>
             <p>なわ太コーチ - 毎日練習を続けているユーザー</p>
         </div>
+
         <div class="refresh-container">
             <button class="refresh-btn" onclick="location.reload()">🔄 最新に更新</button>
         </div>
+
         {% if ranking_data|length >= 3 %}
         <div class="podium">
             <div class="podium-item podium-2">
@@ -949,6 +1192,7 @@ def ranking():
             </div>
         </div>
         {% endif %}
+
         <div class="ranking-list">
             <div class="ranking-title">全ユーザーランキング</div>
             {% if ranking_data|length > 0 %}
@@ -959,7 +1203,9 @@ def ranking():
                         <div class="user-nickname">{{ user['nickname'] }}</div>
                         <div class="user-level">{{ user['level'] }}</div>
                     </div>
-                    <div class="streak-badge">🔥{{ user['streak_days'] }}日</div>
+                    <div class="streak-badge">
+                        <span class="fire-emoji">🔥</span>{{ user['streak_days'] }}日
+                    </div>
                 </div>
                 {% endfor %}
             {% else %}
@@ -974,24 +1220,52 @@ def ranking():
 </body>
 </html>
 """
+
     return render_template_string(html, ranking_data=ranking_data)
 
 
 @app.route("/settings", methods=['GET', 'POST'])
 def settings():
+    """設定画面 - ニックネーム設定追加"""
     try:
         user_id = request.args.get('user_id')
 
         if not user_id:
             return """
             <!DOCTYPE html>
-            <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>エラー</title>
-            <style>
-                body { font-family: -apple-system, sans-serif; background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
-                .container { background: white; padding: 40px 30px; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); text-align: center; max-width: 400px; }
-                h2 { color: #e74c3c; margin-bottom: 15px; }
-            </style></head>
-            <body><div class="container"><h2>⚠️ エラー</h2><p>ユーザーIDが見つかりません。<br>LINEから再度アクセスしてください。</p></div></body></html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>エラー</title>
+                <style>
+                    body {
+                        font-family: -apple-system, sans-serif;
+                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }
+                    .container {
+                        background: white;
+                        padding: 40px 30px;
+                        border-radius: 16px;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                        text-align: center;
+                        max-width: 400px;
+                    }
+                    h2 { color: #e74c3c; margin-bottom: 15px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h2>⚠️ エラー</h2>
+                    <p>ユーザーIDが見つかりません。<br>LINEから再度アクセスしてください。</p>
+                </div>
+            </body>
+            </html>
             """, 400
 
         if request.method == 'POST':
@@ -1001,6 +1275,8 @@ def settings():
 
             timestamp = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n⚙️ [{timestamp}] Settings update POST received")
+            print(f"   User ID: {user_id[:8]}...")
+            print(f"   Form data: level={new_level}, personality={new_personality}, nickname={new_nickname}")
 
             if new_nickname and len(new_nickname) > 10:
                 new_nickname = new_nickname[:10]
@@ -1011,29 +1287,87 @@ def settings():
 
             return f"""
             <!DOCTYPE html>
-            <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>設定完了</title>
-            <style>
-                body {{ font-family: -apple-system, sans-serif; background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }}
-                .container {{ background: white; padding: 50px 30px; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); text-align: center; max-width: 400px; animation: slideIn 0.4s ease-out; }}
-                @keyframes slideIn {{ from {{ opacity: 0; transform: translateY(-20px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-                .success-icon {{ width: 80px; height: 80px; background: #00B900; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 25px; font-size: 45px; color: white; }}
-                h2 {{ color: #333; margin-bottom: 20px; font-size: 26px; }}
-                p {{ color: #666; font-size: 18px; line-height: 1.8; }}
-                .back-notice {{ margin-top: 30px; padding: 15px; background: #f8f9fa; border-radius: 8px; color: #555; font-size: 15px; }}
-                .ranking-link {{ display: inline-block; margin-top: 20px; padding: 12px 25px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; }}
-            </style></head>
-            <body><div class="container">
-                <div class="success-icon">✓</div>
-                <h2>設定を保存しました！</h2>
-                <p>「今すぐ」と送信すると課題が届きます。</p>
-                <a href="{ranking_url}" class="ranking-link">🔥 ランキングを見る</a>
-                <div class="back-notice">LINEの画面に戻ってください</div>
-            </div></body></html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>設定完了</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, sans-serif;
+                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        padding: 50px 30px;
+                        border-radius: 16px;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                        text-align: center;
+                        max-width: 400px;
+                        animation: slideIn 0.4s ease-out;
+                    }}
+                    @keyframes slideIn {{
+                        from {{ opacity: 0; transform: translateY(-20px); }}
+                        to {{ opacity: 1; transform: translateY(0); }}
+                    }}
+                    .success-icon {{
+                        width: 80px;
+                        height: 80px;
+                        background: #00B900;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0 auto 25px;
+                        font-size: 45px;
+                        color: white;
+                    }}
+                    h2 {{ color: #333; margin-bottom: 20px; font-size: 26px; }}
+                    p {{ color: #666; font-size: 18px; line-height: 1.8; }}
+                    .back-notice {{
+                        margin-top: 30px;
+                        padding: 15px;
+                        background: #f8f9fa;
+                        border-radius: 8px;
+                        color: #555;
+                        font-size: 15px;
+                    }}
+                    .ranking-link {{
+                        display: inline-block;
+                        margin-top: 20px;
+                        padding: 12px 25px;
+                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        font-weight: 600;
+                        transition: all 0.3s ease;
+                    }}
+                    .ranking-link:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="success-icon">✓</div>
+                    <h2>設定を保存しました！</h2>
+                    <p>「今すぐ」と送信すると課題が届きます。</p>
+                    <a href="{ranking_url}" class="ranking-link">🔥 ランキングを見る</a>
+                    <div class="back-notice">LINEの画面に戻ってください</div>
+                </div>
+            </body>
+            </html>
             """
 
         current_settings = get_user_settings(user_id)
         current_nickname = current_settings.get('nickname', '') or ''
-        current_personality = current_settings.get('coach_personality', '優しい')
 
         level_options = ''
         for level_name, level_info in USER_LEVELS.items():
@@ -1041,6 +1375,8 @@ def settings():
             level_options += f'<option value="{level_name}" {selected}>{level_name}（{level_info["description"]}）</option>'
 
         personality_options = ''
+        current_personality = current_settings.get('coach_personality', '優しい')
+
         for personality_name in COACH_PERSONALITIES:
             selected = 'selected' if personality_name == current_personality else ''
             personality_options += f'<option value="{personality_name}" {selected}>{personality_name}</option>'
@@ -1049,30 +1385,139 @@ def settings():
 
         html = f"""
         <!DOCTYPE html>
-        <html><head>
+        <html>
+        <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>練習設定 - なわ太コーチ</title>
             <style>
                 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-                body {{ font-family: -apple-system, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; display: flex; align-items: center; justify-content: center; }}
-                .container {{ max-width: 420px; width: 100%; background: white; padding: 35px 30px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: fadeIn 0.5s ease-out; }}
-                @keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(20px); }} to {{ opacity: 1; transform: translateY(0); }} }}
-                .header {{ text-align: center; margin-bottom: 30px; }}
+                body {{
+                    font-family: -apple-system, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }}
+                .container {{
+                    max-width: 420px;
+                    width: 100%;
+                    background: white;
+                    padding: 35px 30px;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                    animation: fadeIn 0.5s ease-out;
+                }}
+                @keyframes fadeIn {{
+                    from {{ opacity: 0; transform: translateY(20px); }}
+                    to {{ opacity: 1; transform: translateY(0); }}
+                }}
+                .header {{
+                    text-align: center;
+                    margin-bottom: 30px;
+                }}
                 .header-icon {{ font-size: 48px; margin-bottom: 10px; }}
-                h2 {{ color: #2c3e50; font-size: 24px; font-weight: 600; margin-bottom: 8px; }}
+                h2 {{
+                    color: #2c3e50;
+                    font-size: 24px;
+                    font-weight: 600;
+                    margin-bottom: 8px;
+                }}
                 .subtitle {{ color: #7f8c8d; font-size: 14px; }}
-                .current-settings {{ background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 15px; border-radius: 12px; margin-bottom: 25px; color: white; font-size: 14px; text-align: center; }}
+                .current-settings {{
+                    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                    padding: 15px;
+                    border-radius: 12px;
+                    margin-bottom: 25px;
+                    color: white;
+                    font-size: 14px;
+                    text-align: center;
+                }}
+                .current-settings strong {{ font-weight: 600; }}
                 .form-group {{ margin-bottom: 25px; }}
-                label {{ display: flex; align-items: center; gap: 8px; color: #2c3e50; font-weight: 600; font-size: 15px; margin-bottom: 10px; }}
-                select, input[type="text"] {{ width: 100%; padding: 14px 16px; font-size: 16px; border: 2px solid #e0e0e0; border-radius: 12px; background-color: #f8f9fa; transition: all 0.3s ease; font-family: inherit; }}
-                select {{ cursor: pointer; appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 12px center; background-size: 20px; padding-right: 40px; }}
-                select:focus, input[type="text"]:focus {{ outline: none; border-color: #667eea; background-color: white; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }}
-                .nickname-hint {{ font-size: 12px; color: #7f8c8d; margin-top: 5px; }}
-                button {{ width: 100%; padding: 16px; background: linear-gradient(135deg, #00B900 0%, #00a000 100%); color: white; border: none; border-radius: 12px; font-size: 17px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(0,185,0,0.3); margin-top: 10px; }}
-                button:hover {{ background: linear-gradient(135deg, #00a000 0%, #008f00 100%); transform: translateY(-2px); }}
-                .divider {{ height: 1px; background: linear-gradient(to right, transparent, #e0e0e0, transparent); margin: 25px 0; }}
-                .ranking-link {{ display: block; text-align: center; margin-top: 15px; padding: 12px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; text-decoration: none; border-radius: 10px; font-weight: 600; }}
+                label {{
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    color: #2c3e50;
+                    font-weight: 600;
+                    font-size: 15px;
+                    margin-bottom: 10px;
+                }}
+                .label-icon {{ font-size: 18px; }}
+                select, input[type="text"] {{
+                    width: 100%;
+                    padding: 14px 16px;
+                    font-size: 16px;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 12px;
+                    background-color: #f8f9fa;
+                    transition: all 0.3s ease;
+                    font-family: inherit;
+                }}
+                select {{
+                    cursor: pointer;
+                    appearance: none;
+                    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+                    background-repeat: no-repeat;
+                    background-position: right 12px center;
+                    background-size: 20px;
+                    padding-right: 40px;
+                }}
+                select:focus, input[type="text"]:focus {{
+                    outline: none;
+                    border-color: #667eea;
+                    background-color: white;
+                    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+                }}
+                .nickname-hint {{
+                    font-size: 12px;
+                    color: #7f8c8d;
+                    margin-top: 5px;
+                }}
+                button {{
+                    width: 100%;
+                    padding: 16px;
+                    background: linear-gradient(135deg, #00B900 0%, #00a000 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 12px;
+                    font-size: 17px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 15px rgba(0, 185, 0, 0.3);
+                    margin-top: 10px;
+                }}
+                button:hover {{
+                    background: linear-gradient(135deg, #00a000 0%, #008f00 100%);
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 20px rgba(0, 185, 0, 0.4);
+                }}
+                button:active {{ transform: translateY(0); }}
+                .divider {{
+                    height: 1px;
+                    background: linear-gradient(to right, transparent, #e0e0e0, transparent);
+                    margin: 25px 0;
+                }}
+                .ranking-link {{
+                    display: block;
+                    text-align: center;
+                    margin-top: 15px;
+                    padding: 12px;
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    transition: all 0.3s ease;
+                }}
+                .ranking-link:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                }}
             </style>
         </head>
         <body>
@@ -1088,26 +1533,41 @@ def settings():
                 </div>
                 <form method="POST">
                     <div class="form-group">
-                        <label><span>👤</span>ニックネーム（ランキング表示用）</label>
+                        <label>
+                            <span class="label-icon">👤</span>
+                            ニックネーム（ランキング表示用）
+                        </label>
                         <input type="text" name="nickname" value="{current_nickname}" maxlength="10" placeholder="例: ジャンプ太郎">
                         <div class="nickname-hint">※ランキングに表示されます（10文字まで）</div>
                     </div>
                     <div class="divider"></div>
                     <div class="form-group">
-                        <label><span>🎯</span>レベル</label>
-                        <select name="level">{level_options}</select>
+                        <label>
+                            <span class="label-icon">🎯</span>
+                            レベル
+                        </label>
+                        <select name="level">
+                            {level_options}
+                        </select>
                     </div>
                     <div class="divider"></div>
                     <div class="form-group">
-                        <label><span>😊</span>コーチの性格</label>
-                        <select name="coach_personality">{personality_options}</select>
+                        <label>
+                            <span class="label-icon">😊</span>
+                            コーチの性格
+                        </label>
+                        <select name="coach_personality">
+                            {personality_options}
+                        </select>
                     </div>
                     <button type="submit">💾 設定を保存する</button>
                 </form>
                 <a href="{ranking_url}" class="ranking-link">🔥 ランキングを見る</a>
             </div>
-        </body></html>
+        </body>
+        </html>
         """
+
         return render_template_string(html)
 
     except Exception as e:
@@ -1119,9 +1579,11 @@ def settings():
 
 @app.route("/callback", methods=['POST'])
 def callback():
+    """LINE Webhook"""
     try:
         signature = request.headers.get("X-Line-Signature")
         body = request.get_data(as_text=True)
+
         webhook_handler.handle(body, signature)
         return "OK"
     except InvalidSignatureError:
@@ -1136,6 +1598,7 @@ def callback():
 
 @webhook_handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    """LINEメッセージを受信したときの処理"""
     try:
         user_id = event.source.user_id
         text = event.message.text.strip()
@@ -1143,6 +1606,7 @@ def handle_message(event):
 
         print(f"💬 [{timestamp}] Message from {user_id[:8]}...: '{text}'")
 
+        # 初回ユーザーチェック（配信回数が0の場合）
         settings = get_user_settings(user_id)
         if settings['delivery_count'] == 0 and text not in ["設定", "今すぐ", "できた", "難しかった", "友だちに紹介する", "ランキング"]:
             welcome_text = (
@@ -1166,8 +1630,10 @@ def handle_message(event):
                 "🔥 毎日「今すぐ」を送って連続記録を伸ばそう！"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=welcome_text))
+            print(f"👋 [{timestamp}] Welcome message sent to new user")
             return
 
+        # 設定画面へのリンクを送信
         if text == "設定":
             settings_url = f"{APP_PUBLIC_URL}/settings?user_id={user_id}"
             reply_text = (
@@ -1177,8 +1643,10 @@ def handle_message(event):
                 "※リンクを知っている人は誰でも設定を変更できてしまうため、他人に教えないでください。"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"⚙️ [{timestamp}] Settings link sent")
             return
 
+        # ランキングページへのリンクを送信
         if text == "ランキング":
             ranking_url = f"{APP_PUBLIC_URL}/ranking"
             reply_text = (
@@ -1188,37 +1656,34 @@ def handle_message(event):
                 "💡 ニックネームは「設定」から変更できます。"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"🏆 [{timestamp}] Ranking link sent")
             return
 
+        # 今すぐ課題を配信（1日3回まで）
         if text == "今すぐ":
             today = datetime.now(JST).strftime("%Y-%m-%d")
 
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT immediate_request_count, last_immediate_request_date 
-                FROM users WHERE user_id = %s
-            ''', (user_id,))
-            row = cursor.fetchone()
+            # 今日の即時配信回数をチェック
+            resp = supabase.table("users").select(
+                "immediate_request_count, last_immediate_request_date"
+            ).eq("user_id", user_id).execute()
 
             immediate_count = 0
             last_request_date = None
 
-            if row:
-                immediate_count = row['immediate_request_count'] or 0
-                last_request_date = row['last_immediate_request_date']
+            if resp.data:
+                immediate_count = resp.data[0].get("immediate_request_count") or 0
+                last_request_date = resp.data[0].get("last_immediate_request_date")
 
+            # 日付が変わっていたらカウントをリセット
             if last_request_date != today:
                 immediate_count = 0
-                cursor.execute('''
-                    UPDATE users 
-                    SET immediate_request_count = 0, last_immediate_request_date = %s
-                    WHERE user_id = %s
-                ''', (today, user_id))
-                conn.commit()
+                supabase.table("users").update({
+                    "immediate_request_count": 0,
+                    "last_immediate_request_date": today,
+                }).eq("user_id", user_id).execute()
 
-            conn.close()
-
+            # 1日3回までの制限チェック
             if immediate_count >= 3:
                 reply_text = (
                     "⚠️ 本日の「今すぐ」は3回まで利用できます。\n\n"
@@ -1227,22 +1692,25 @@ def handle_message(event):
                     "💡 毎日続けて連続記録を伸ばそう🔥"
                 )
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+                print(f"🚫 [{timestamp}] Immediate delivery limit reached for {user_id[:8]}...")
                 return
 
-            conn = get_db()
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE users 
-                SET immediate_request_count = %s, last_immediate_request_date = %s
-                WHERE user_id = %s
-            ''', (immediate_count + 1, today, user_id))
-            conn.commit()
-            conn.close()
+            # カウントを増やす
+            supabase.table("users").update({
+                "immediate_request_count": immediate_count + 1,
+                "last_immediate_request_date": today,
+            }).eq("user_id", user_id).execute()
 
+            print(f"🚀 [{timestamp}] Immediate delivery requested by {user_id[:8]}... ({immediate_count + 1}/3 today)")
+
+            # 課題を生成してreplyで返信
             challenge_content = create_challenge_message(user_id, settings['level'])
+
             full_message = challenge_content + "\n\n💬 フィードバック\n「できた」「難しかった」と送ると、次回の課題が調整されます！"
+
             messages = [TextSendMessage(text=full_message)]
 
+            # 応援メッセージ（配信3回以降、1回だけ）
             if settings['delivery_count'] >= 3 and settings['support_shown'] == 0:
                 support_message = (
                     "いつも練習お疲れ様です！🙏\n\n"
@@ -1253,12 +1721,16 @@ def handle_message(event):
                 )
                 messages.append(TextSendMessage(text=support_message))
                 mark_support_shown(user_id)
+                print(f"💝 [{timestamp}] Support message added")
 
             line_bot_api.reply_message(event.reply_token, messages)
+            print(f"✅ [{timestamp}] Challenge sent via reply")
             return
 
+        # フィードバック: 成功
         if text in ["できた", "成功", "できました", "クリア", "達成"]:
             record_feedback(user_id, is_success=True)
+
             personality = settings.get('coach_personality', '優しい')
             praise_by_personality = {
                 "熱血": "素晴らしい！！その調子だ！🔥 次回はもっと難しい技にチャレンジだ！💪",
@@ -1268,11 +1740,15 @@ def handle_message(event):
                 "冷静": "データ的に良好です。次回は難度を0.2段階上げます。継続してください。"
             }
             reply_text = praise_by_personality.get(personality, praise_by_personality["優しい"])
+
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"✅ [{timestamp}] Success feedback recorded")
             return
 
+        # フィードバック: 難しかった
         if text in ["難しかった", "できなかった", "無理", "難しい", "厳しい"]:
             record_feedback(user_id, is_success=False)
+
             personality = settings.get('coach_personality', '優しい')
             encouragement_by_personality = {
                 "熱血": "大丈夫だ！お前ならできる！🔥 次回は少し軽めにするから、絶対いけるぞ！💪",
@@ -1282,9 +1758,12 @@ def handle_message(event):
                 "冷静": "難度設定を調整します。次回は0.3段階下げて再トライしてください。"
             }
             reply_text = encouragement_by_personality.get(personality, encouragement_by_personality["優しい"])
+
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"⚠️ [{timestamp}] Difficulty feedback recorded")
             return
 
+        # 友だちに紹介する機能
         if text in ["友だちに紹介する", "友達に紹介する", "紹介"]:
             line_add_url = f"https://line.me/R/ti/p/{LINE_BOT_ID}"
             reply_text = (
@@ -1295,8 +1774,10 @@ def handle_message(event):
                 "💡 紹介してくれると開発の励みになります！"
             )
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            print(f"👥 [{timestamp}] Friend referral sent")
             return
 
+        # デフォルトのヘルプメニュー
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=(
@@ -1309,6 +1790,7 @@ def handle_message(event):
                 "🔥 毎日「今すぐ」を送って連続記録を伸ばそう！"
             ))
         )
+        print(f"ℹ️ [{timestamp}] Help menu sent")
 
     except Exception as e:
         print(f"❌ handle_message error: {e}")
@@ -1320,10 +1802,16 @@ def handle_message(event):
 # アプリケーション起動時の初期化
 # ==========================================
 print("\n" + "=" * 70)
-print("🚀 Initializing Jump Rope AI Coach Bot")
+print("🚀 Initializing Jump Rope AI Coach Bot (Supabase Edition)")
 print("=" * 70 + "\n")
 
-init_database()
+# Supabase接続確認
+try:
+    test_resp = supabase.table("users").select("user_id").limit(1).execute()
+    print("✅ Supabase connection OK")
+except Exception as e:
+    print(f"❌ Supabase connection error: {e}")
+    print("   テーブルが存在するか確認してください。")
 
 startup_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 print(f"\n{'=' * 70}")
