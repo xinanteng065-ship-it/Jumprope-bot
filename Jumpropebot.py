@@ -12,7 +12,7 @@ from openai import OpenAI
 from supabase import create_client, Client
 
 app = Flask(__name__)
-
+ 
 # ==========================================
 # 環境変数の読み込み
 # ==========================================
