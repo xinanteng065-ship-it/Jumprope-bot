@@ -1504,6 +1504,6 @@ startup_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 print(f"✅ Bot initialized at {startup_time}")
 print("=" * 70 + "\n")
 
-if __name__ == "__main__":
-    print("🔧 Running in development mode")
-    app.run(host='0.0.0.0', port=10000, debug=False)
+# if __name__ == "__main__":
+#    print("🔧 Running in development mode")
+#    app.run(host='0.0.0.0', port=10000, debug=False)
