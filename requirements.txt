@@ -5,3 +5,4 @@ pytz
 gunicorn
 supabase
 postgrest
+psycopg2-binary
