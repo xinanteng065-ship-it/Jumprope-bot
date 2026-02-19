@@ -2084,7 +2084,7 @@ def settings():
     <div class="topbar">
         <div class="topbar-inner">
             <div class="app-logo">
-  <img src="ChatGPT Image 2026年2月14日 15_22_51.png" alt="なわ太コーチ">
+       <alt="なわ太コーチ">
 </div>
             <a href="{ranking_url}" class="ranking-link-top">🔥 ランキング</a>
         </div>
