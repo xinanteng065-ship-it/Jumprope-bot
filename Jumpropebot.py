@@ -1688,14 +1688,15 @@ def settings():
         }}
 
         .app-logo {{
-            font-family: 'Bebas Neue', sans-serif;
-            font-size: 22px;
-            letter-spacing: 0.05em;
-            background: linear-gradient(135deg, var(--accent), var(--accent2));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }}
+    display: flex;
+    align-items: center;
+}}
+
+.app-logo img {{
+    height: 28px;   /* ← 好きなサイズに調整 */
+    width: auto;
+    display: block;
+}}
 
         .ranking-link-top {{
             display: inline-flex;
@@ -2084,7 +2085,7 @@ def settings():
     <div class="topbar">
         <div class="topbar-inner">
             <div class="app-logo">
-       <alt="なわ太コーチ">
+    <img src="{{ url_for('static', filename='images/logo.png') }}" alt="なわ太コーチ">
 </div>
             <a href="{ranking_url}" class="ranking-link-top">🔥 ランキング</a>
         </div>
