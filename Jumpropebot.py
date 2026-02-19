@@ -1350,7 +1350,7 @@ def ranking():
         <header class="header">
             <div class="header-badge">🔥 Live Ranking</div>
             <h1>STREAK BOARD</h1>
-            <p class="header-sub">なわ太コーチ — 毎日の練習が積み重なる</p>
+            <p class="header-sub">なわ太コーチ — 連続記録ランキング</p>
         </header>
 
         <!-- 更新ボタン -->
@@ -2083,7 +2083,9 @@ def settings():
     <!-- トップバー -->
     <div class="topbar">
         <div class="topbar-inner">
-            <div class="app-logo">なわ太コーチ</div>
+            <div class="app-logo">
+  <img src="ChatGPT Image 2026年2月14日 15_22_51.png" alt="なわ太コーチ">
+</div>
             <a href="{ranking_url}" class="ranking-link-top">🔥 ランキング</a>
         </div>
     </div>
@@ -2098,7 +2100,7 @@ def settings():
 
         <!-- 現在の設定サマリー -->
         <div class="current-summary">
-            <div class="summary-avatar">🤸</div>
+            <div class="summary-avatar">🏋</div>
             <div class="summary-text">
                 <div class="summary-name">{current_nickname or '名前を設定しよう'}</div>
                 <div class="summary-detail">{current_level} ・ {current_personality}コーチ</div>
