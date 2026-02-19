@@ -888,7 +888,7 @@ def index():
 
 @app.route("/ranking")
 def ranking():
-    """ランキングページ - 落ち着いたデザイン"""
+    """ランキングページ - プレミアムデザイン"""
     ranking_data = get_ranking_data()
 
     html = """<!DOCTYPE html>
@@ -897,325 +897,545 @@ def ranking():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>連続記録ランキング - なわ太コーチ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=Bebas+Neue&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-card: #12121a;
+            --bg-card2: #1a1a26;
+            --accent-gold: #f5c842;
+            --accent-silver: #b0bec5;
+            --accent-bronze: #cd8b4a;
+            --accent-fire: #ff6b35;
+            --accent-blue: #4facfe;
+            --text-primary: #f0f0f8;
+            --text-secondary: #8888aa;
+            --border: rgba(255,255,255,0.07);
+            --glow-gold: rgba(245, 200, 66, 0.25);
         }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
-            background: #f5f7fa;
+            font-family: 'Noto Sans JP', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
             min-height: 100vh;
-            padding: 20px;
+            overflow-x: hidden;
         }
 
-        .container {
-            max-width: 800px;
+        /* === 背景エフェクト === */
+        .bg-glow {
+            position: fixed;
+            top: -30%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 600px;
+            background: radial-gradient(ellipse, rgba(79, 172, 254, 0.06) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .bg-glow2 {
+            position: fixed;
+            bottom: -20%;
+            right: -10%;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(ellipse, rgba(245, 200, 66, 0.04) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* === レイアウト === */
+        .wrapper {
+            position: relative;
+            z-index: 1;
+            max-width: 760px;
             margin: 0 auto;
+            padding: 0 16px 60px;
         }
 
+        /* === ヘッダー === */
         .header {
             text-align: center;
-            color: #2c3e50;
-            margin-bottom: 40px;
-            padding-top: 20px;
+            padding: 48px 0 40px;
+        }
+
+        .header-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 107, 53, 0.15);
+            border: 1px solid rgba(255, 107, 53, 0.3);
+            color: var(--accent-fire);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            padding: 5px 14px;
+            border-radius: 100px;
+            text-transform: uppercase;
+            margin-bottom: 18px;
         }
 
         .header h1 {
-            font-size: 28px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #1a202c;
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: clamp(42px, 10vw, 64px);
+            letter-spacing: 0.04em;
+            line-height: 1;
+            background: linear-gradient(135deg, #ffffff 30%, #b0bec5 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
         }
 
-        .header p {
-            font-size: 14px;
-            color: #718096;
+        .header-sub {
+            font-size: 13px;
+            color: var(--text-secondary);
+            letter-spacing: 0.05em;
         }
 
-        .refresh-container {
-            text-align: center;
-            margin-bottom: 30px;
+        /* === 更新ボタン === */
+        .refresh-wrap {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 36px;
         }
 
         .refresh-btn {
-            background: #4a5568;
-            color: white;
-            border: none;
-            padding: 10px 24px;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-family: 'Noto Sans JP', sans-serif;
+            font-size: 13px;
+            padding: 9px 20px;
+            border-radius: 100px;
             cursor: pointer;
-            transition: background 0.2s ease;
+            transition: all 0.25s;
         }
 
         .refresh-btn:hover {
-            background: #2d3748;
+            border-color: rgba(255,255,255,0.2);
+            color: var(--text-primary);
+            background: rgba(255,255,255,0.04);
         }
 
-        .refresh-btn:active {
-            transform: scale(0.98);
+        .refresh-icon {
+            display: inline-block;
+            transition: transform 0.5s ease;
         }
 
-        .podium {
-            display: flex;
-            justify-content: center;
-            align-items: flex-end;
-            gap: 12px;
-            margin-bottom: 40px;
+        .refresh-btn:hover .refresh-icon { transform: rotate(180deg); }
+
+        /* === 表彰台 === */
+        .podium-section {
+            margin-bottom: 32px;
         }
 
-        .podium-item {
-            background: white;
-            border-radius: 12px;
-            padding: 20px 16px;
+        .podium-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: auto;
+            gap: 10px;
+            align-items: end;
+        }
+
+        .podium-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px 16px 20px;
             text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            border: 1px solid #e2e8f0;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
 
-        .podium-item:hover {
+        .podium-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+        }
+
+        .podium-card:hover {
             transform: translateY(-4px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
         }
 
+        /* 1位 */
         .podium-1 {
-            order: 2;
-            width: 160px;
-            border-top: 3px solid #f59e0b;
+            grid-column: 2;
+            grid-row: 1;
+            background: linear-gradient(160deg, #1a1810 0%, #12121a 100%);
+            border-color: rgba(245, 200, 66, 0.25);
+            box-shadow: 0 0 40px rgba(245, 200, 66, 0.08), inset 0 1px 0 rgba(245, 200, 66, 0.15);
         }
 
+        .podium-1::before { background: linear-gradient(90deg, transparent, var(--accent-gold), transparent); }
+        .podium-1:hover { box-shadow: 0 8px 50px rgba(245, 200, 66, 0.2), inset 0 1px 0 rgba(245, 200, 66, 0.2); }
+
+        /* 2位 */
         .podium-2 {
-            order: 1;
-            width: 140px;
-            border-top: 3px solid #9ca3af;
+            grid-column: 1;
+            grid-row: 1;
+            background: linear-gradient(160deg, #141418 0%, #12121a 100%);
+            border-color: rgba(176, 190, 197, 0.2);
         }
 
+        .podium-2::before { background: linear-gradient(90deg, transparent, var(--accent-silver), transparent); }
+
+        /* 3位 */
         .podium-3 {
-            order: 3;
-            width: 140px;
-            border-top: 3px solid #cd7f32;
+            grid-column: 3;
+            grid-row: 1;
+            background: linear-gradient(160deg, #16120e 0%, #12121a 100%);
+            border-color: rgba(205, 139, 74, 0.2);
         }
+
+        .podium-3::before { background: linear-gradient(90deg, transparent, var(--accent-bronze), transparent); }
 
         .medal {
-            font-size: 36px;
-            margin-bottom: 8px;
+            font-size: 32px;
             display: block;
+            margin-bottom: 12px;
+            filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
         }
 
-        .podium-nickname {
-            font-size: 14px;
-            font-weight: 600;
-            color: #2d3748;
-            margin-bottom: 8px;
+        .podium-1 .medal { font-size: 40px; }
+
+        .podium-rank {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 11px;
+            letter-spacing: 0.2em;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .podium-1 .podium-rank { color: var(--accent-gold); }
+        .podium-2 .podium-rank { color: var(--accent-silver); }
+        .podium-3 .podium-rank { color: var(--accent-bronze); }
+
+        .podium-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 10px;
             word-break: break-word;
             line-height: 1.4;
         }
 
-        .podium-streak {
-            font-size: 24px;
-            font-weight: 700;
-            color: #1a202c;
-            margin-bottom: 4px;
+        .podium-1 .podium-name { font-size: 15px; }
+
+        .podium-streak-num {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 40px;
+            line-height: 1;
+            color: var(--accent-gold);
+            letter-spacing: 0.02em;
         }
 
-        .podium-label {
-            font-size: 12px;
-            color: #718096;
+        .podium-2 .podium-streak-num { font-size: 34px; color: var(--accent-silver); }
+        .podium-3 .podium-streak-num { font-size: 34px; color: var(--accent-bronze); }
+
+        .podium-streak-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+            letter-spacing: 0.05em;
         }
 
-        .ranking-list {
-            background: white;
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            border: 1px solid #e2e8f0;
+        .podium-level-badge {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 100px;
+            margin-top: 8px;
+            background: rgba(255,255,255,0.06);
+            color: var(--text-secondary);
+        }
+
+        /* === ランキングリスト === */
+        .ranking-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .ranking-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px 16px;
+            border-bottom: 1px solid var(--border);
         }
 
         .ranking-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #1a202c;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 2px solid #e2e8f0;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: 0.05em;
         }
 
-        .ranking-item {
+        .ranking-count {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* 列ヘッダー */
+        .rank-col-header {
+            display: grid;
+            grid-template-columns: 52px 1fr auto;
+            padding: 8px 24px;
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* ランキング行 */
+        .rank-row {
+            display: grid;
+            grid-template-columns: 52px 1fr auto;
+            align-items: center;
+            padding: 14px 24px;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+            animation: rowFadeIn 0.4s ease both;
+        }
+
+        .rank-row:last-child { border-bottom: none; }
+
+        .rank-row:hover { background: rgba(255,255,255,0.025); }
+
+        @keyframes rowFadeIn {
+            from { opacity: 0; transform: translateX(-8px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* 順位 */
+        .rank-pos {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 20px;
+            color: var(--text-secondary);
+            text-align: center;
+            letter-spacing: 0.02em;
+        }
+
+        .rank-row:nth-child(1) .rank-pos { color: var(--accent-gold); }
+        .rank-row:nth-child(2) .rank-pos { color: var(--accent-silver); }
+        .rank-row:nth-child(3) .rank-pos { color: var(--accent-bronze); }
+
+        /* ユーザー情報 */
+        .rank-info { min-width: 0; }
+
+        .rank-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .rank-level {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* ストリーク */
+        .rank-streak {
             display: flex;
             align-items: center;
-            padding: 14px 12px;
-            border-bottom: 1px solid #f7fafc;
-            transition: background 0.2s ease;
-        }
-
-        .ranking-item:hover {
-            background: #f7fafc;
-            border-radius: 8px;
-        }
-
-        .ranking-item:last-child {
-            border-bottom: none;
-        }
-
-        .rank-number {
-            font-size: 16px;
-            font-weight: 700;
-            width: 40px;
-            text-align: center;
-            color: #4a5568;
-        }
-
-        .user-info {
-            flex: 1;
-            padding: 0 16px;
-        }
-
-        .user-nickname {
-            font-size: 13px;
-            font-weight: 600;
-            color: #2d3748;
-            margin-bottom: 2px;
-        }
-
-        .user-level {
-            font-size: 11px;
-            color: #a0aec0;
-        }
-
-        .streak-badge {
-            background: #edf2f7;
-            color: #2d3748;
+            gap: 6px;
+            background: rgba(255, 107, 53, 0.1);
+            border: 1px solid rgba(255, 107, 53, 0.2);
+            border-radius: 100px;
             padding: 6px 14px;
-            border-radius: 16px;
-            font-size: 13px;
-            font-weight: 600;
+            white-space: nowrap;
         }
 
-        .fire-emoji {
-            margin-right: 2px;
+        .streak-fire { font-size: 14px; }
+
+        .streak-val {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 18px;
+            color: var(--accent-fire);
+            letter-spacing: 0.02em;
+            line-height: 1;
         }
 
+        .streak-unit {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        /* トップ3のストリーク強調 */
+        .rank-row:nth-child(1) .rank-streak { background: rgba(245,200,66,0.1); border-color: rgba(245,200,66,0.25); }
+        .rank-row:nth-child(1) .streak-val { color: var(--accent-gold); }
+        .rank-row:nth-child(2) .rank-streak { background: rgba(176,190,197,0.1); border-color: rgba(176,190,197,0.2); }
+        .rank-row:nth-child(2) .streak-val { color: var(--accent-silver); }
+        .rank-row:nth-child(3) .rank-streak { background: rgba(205,139,74,0.1); border-color: rgba(205,139,74,0.2); }
+        .rank-row:nth-child(3) .streak-val { color: var(--accent-bronze); }
+
+        /* アニメーション遅延 */
+        .rank-row:nth-child(1)  { animation-delay: 0.05s; }
+        .rank-row:nth-child(2)  { animation-delay: 0.10s; }
+        .rank-row:nth-child(3)  { animation-delay: 0.15s; }
+        .rank-row:nth-child(4)  { animation-delay: 0.18s; }
+        .rank-row:nth-child(5)  { animation-delay: 0.21s; }
+        .rank-row:nth-child(6)  { animation-delay: 0.24s; }
+        .rank-row:nth-child(7)  { animation-delay: 0.27s; }
+        .rank-row:nth-child(8)  { animation-delay: 0.30s; }
+        .rank-row:nth-child(9)  { animation-delay: 0.33s; }
+        .rank-row:nth-child(10) { animation-delay: 0.36s; }
+
+        /* 空状態 */
         .empty-state {
             text-align: center;
-            padding: 60px 20px;
-            color: #a0aec0;
+            padding: 64px 24px;
         }
 
-        .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 16px;
+        .empty-icon { font-size: 56px; opacity: 0.3; margin-bottom: 16px; }
+
+        .empty-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .empty-sub { font-size: 13px; color: var(--text-secondary); opacity: 0.6; }
+
+        /* フッター */
+        .footer {
+            text-align: center;
+            margin-top: 32px;
+            font-size: 12px;
+            color: var(--text-secondary);
             opacity: 0.5;
         }
 
-        .empty-state h3 {
-            font-size: 18px;
-            color: #4a5568;
-            margin-bottom: 8px;
-        }
-
-        .empty-state p {
-            font-size: 14px;
-        }
-
-        @media (max-width: 600px) {
-            .header h1 {
-                font-size: 24px;
-            }
-
-            .podium {
-                flex-direction: column;
-                align-items: center;
-            }
-
-            .podium-item {
-                width: 100% !important;
-                max-width: 280px;
-            }
-
-            .podium-1 {
-                order: 1;
-            }
-
-            .podium-2 {
-                order: 2;
-            }
-
-            .podium-3 {
-                order: 3;
-            }
-
-            .user-nickname {
-                font-size: 12px;
-            }
-
-            .podium-nickname {
-                font-size: 13px;
-            }
+        /* レスポンシブ */
+        @media (max-width: 480px) {
+            .rank-col-header, .rank-row { padding-left: 16px; padding-right: 16px; }
+            .rank-col-header { grid-template-columns: 44px 1fr auto; }
+            .rank-row { grid-template-columns: 44px 1fr auto; }
+            .podium-grid { gap: 8px; }
+            .podium-card { padding: 18px 10px 16px; }
+            .podium-streak-num { font-size: 30px; }
+            .podium-2 .podium-streak-num,
+            .podium-3 .podium-streak-num { font-size: 26px; }
+            .ranking-header { padding: 16px 16px 14px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔥 連続記録ランキング</h1>
-            <p>なわ太コーチ - 毎日練習を続けているユーザー</p>
-        </div>
+    <div class="bg-glow"></div>
+    <div class="bg-glow2"></div>
 
-        <div class="refresh-container">
-            <button class="refresh-btn" onclick="location.reload()">🔄 最新に更新</button>
+    <div class="wrapper">
+
+        <!-- ヘッダー -->
+        <header class="header">
+            <div class="header-badge">🔥 Live Ranking</div>
+            <h1>STREAK BOARD</h1>
+            <p class="header-sub">なわ太コーチ — 毎日の練習が積み重なる</p>
+        </header>
+
+        <!-- 更新ボタン -->
+        <div class="refresh-wrap">
+            <button class="refresh-btn" onclick="location.reload()">
+                <span class="refresh-icon">↻</span> 最新に更新
+            </button>
         </div>
 
         {% if ranking_data|length >= 3 %}
-        <div class="podium">
-            <div class="podium-item podium-2">
-                <span class="medal">🥈</span>
-                <div class="podium-nickname">{{ ranking_data[1]['nickname'] }}</div>
-                <div class="podium-streak">{{ ranking_data[1]['streak_days'] }}</div>
-                <div class="podium-label">日連続</div>
+        <!-- 表彰台 -->
+        <section class="podium-section">
+            <div class="podium-grid">
+                <!-- 2位 -->
+                <div class="podium-card podium-2">
+                    <span class="medal">🥈</span>
+                    <div class="podium-rank">2ND PLACE</div>
+                    <div class="podium-name">{{ ranking_data[1]['nickname'] }}</div>
+                    <div class="podium-streak-num">{{ ranking_data[1]['streak_days'] }}</div>
+                    <div class="podium-streak-label">日連続</div>
+                    <div class="podium-level-badge">{{ ranking_data[1]['level'] }}</div>
+                </div>
+
+                <!-- 1位 -->
+                <div class="podium-card podium-1">
+                    <span class="medal">🥇</span>
+                    <div class="podium-rank">1ST PLACE</div>
+                    <div class="podium-name">{{ ranking_data[0]['nickname'] }}</div>
+                    <div class="podium-streak-num">{{ ranking_data[0]['streak_days'] }}</div>
+                    <div class="podium-streak-label">日連続</div>
+                    <div class="podium-level-badge">{{ ranking_data[0]['level'] }}</div>
+                </div>
+
+                <!-- 3位 -->
+                <div class="podium-card podium-3">
+                    <span class="medal">🥉</span>
+                    <div class="podium-rank">3RD PLACE</div>
+                    <div class="podium-name">{{ ranking_data[2]['nickname'] }}</div>
+                    <div class="podium-streak-num">{{ ranking_data[2]['streak_days'] }}</div>
+                    <div class="podium-streak-label">日連続</div>
+                    <div class="podium-level-badge">{{ ranking_data[2]['level'] }}</div>
+                </div>
             </div>
-            <div class="podium-item podium-1">
-                <span class="medal">🥇</span>
-                <div class="podium-nickname">{{ ranking_data[0]['nickname'] }}</div>
-                <div class="podium-streak">{{ ranking_data[0]['streak_days'] }}</div>
-                <div class="podium-label">日連続</div>
-            </div>
-            <div class="podium-item podium-3">
-                <span class="medal">🥉</span>
-                <div class="podium-nickname">{{ ranking_data[2]['nickname'] }}</div>
-                <div class="podium-streak">{{ ranking_data[2]['streak_days'] }}</div>
-                <div class="podium-label">日連続</div>
-            </div>
-        </div>
+        </section>
         {% endif %}
 
-        <div class="ranking-list">
-            <div class="ranking-title">全ユーザーランキング</div>
+        <!-- ランキングリスト -->
+        <section class="ranking-section">
+            <div class="ranking-header">
+                <div class="ranking-title">全ランキング</div>
+                <div class="ranking-count">{{ ranking_data|length }} 人参加中</div>
+            </div>
+
             {% if ranking_data|length > 0 %}
-                {% for user in ranking_data %}
-                <div class="ranking-item">
-                    <div class="rank-number">{{ loop.index }}</div>
-                    <div class="user-info">
-                        <div class="user-nickname">{{ user['nickname'] }}</div>
-                        <div class="user-level">{{ user['level'] }}</div>
-                    </div>
-                    <div class="streak-badge">
-                        <span class="fire-emoji">🔥</span>{{ user['streak_days'] }}日
-                    </div>
+            <div class="rank-col-header">
+                <span style="text-align:center">順位</span>
+                <span style="padding-left:8px">ユーザー</span>
+                <span>連続記録</span>
+            </div>
+
+            {% for user in ranking_data %}
+            <div class="rank-row">
+                <div class="rank-pos">{{ loop.index }}</div>
+                <div class="rank-info">
+                    <div class="rank-name">{{ user['nickname'] }}</div>
+                    <div class="rank-level">{{ user['level'] }}</div>
                 </div>
-                {% endfor %}
+                <div class="rank-streak">
+                    <span class="streak-fire">🔥</span>
+                    <span class="streak-val">{{ user['streak_days'] }}</span>
+                    <span class="streak-unit">日</span>
+                </div>
+            </div>
+            {% endfor %}
+
             {% else %}
-                <div class="empty-state">
-                    <div class="empty-state-icon">📊</div>
-                    <h3>まだランキングデータがありません</h3>
-                    <p>連続記録を達成したユーザーがここに表示されます</p>
-                </div>
+            <div class="empty-state">
+                <div class="empty-icon">🏆</div>
+                <div class="empty-title">ランキングデータがありません</div>
+                <div class="empty-sub">毎日「今すぐ」を送って記録をつけよう！</div>
+            </div>
             {% endif %}
-        </div>
+        </section>
+
+        <div class="footer">© なわ太コーチ — Jump Rope AI Coach</div>
     </div>
 </body>
 </html>
@@ -1226,7 +1446,7 @@ def ranking():
 
 @app.route("/settings", methods=['GET', 'POST'])
 def settings():
-    """設定画面 - ニックネーム設定追加"""
+    """設定画面 - プレミアムデザイン"""
     try:
         user_id = request.args.get('user_id')
 
@@ -1237,31 +1457,38 @@ def settings():
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>エラー</title>
+                <title>エラー — なわ太コーチ</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet">
                 <style>
+                    * { margin:0; padding:0; box-sizing:border-box; }
                     body {
-                        font-family: -apple-system, sans-serif;
-                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        font-family: 'Noto Sans JP', sans-serif;
+                        background: #0a0a0f;
                         min-height: 100vh;
                         display: flex;
                         align-items: center;
                         justify-content: center;
                         padding: 20px;
                     }
-                    .container {
-                        background: white;
-                        padding: 40px 30px;
-                        border-radius: 16px;
-                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                    .card {
+                        background: #12121a;
+                        border: 1px solid rgba(255,255,255,0.07);
+                        border-radius: 20px;
+                        padding: 48px 36px;
                         text-align: center;
-                        max-width: 400px;
+                        max-width: 360px;
+                        width: 100%;
                     }
-                    h2 { color: #e74c3c; margin-bottom: 15px; }
+                    .icon { font-size: 48px; margin-bottom: 20px; }
+                    h2 { font-size: 18px; color: #f0f0f8; margin-bottom: 12px; font-weight: 700; }
+                    p { font-size: 14px; color: #8888aa; line-height: 1.7; }
                 </style>
             </head>
             <body>
-                <div class="container">
-                    <h2>⚠️ エラー</h2>
+                <div class="card">
+                    <div class="icon">⚠️</div>
+                    <h2>アクセスエラー</h2>
                     <p>ユーザーIDが見つかりません。<br>LINEから再度アクセスしてください。</p>
                 </div>
             </body>
@@ -1291,76 +1518,91 @@ def settings():
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>設定完了</title>
+                <title>設定完了 — なわ太コーチ</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=Bebas+Neue&display=swap" rel="stylesheet">
                 <style>
+                    * {{ margin:0; padding:0; box-sizing:border-box; }}
                     body {{
-                        font-family: -apple-system, sans-serif;
-                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        font-family: 'Noto Sans JP', sans-serif;
+                        background: #0a0a0f;
                         min-height: 100vh;
                         display: flex;
                         align-items: center;
                         justify-content: center;
                         padding: 20px;
                     }}
-                    .container {{
-                        background: white;
-                        padding: 50px 30px;
-                        border-radius: 16px;
-                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                    .card {{
+                        background: #12121a;
+                        border: 1px solid rgba(255,255,255,0.07);
+                        border-radius: 24px;
+                        padding: 52px 36px;
                         text-align: center;
-                        max-width: 400px;
-                        animation: slideIn 0.4s ease-out;
+                        max-width: 380px;
+                        width: 100%;
+                        animation: pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
                     }}
-                    @keyframes slideIn {{
-                        from {{ opacity: 0; transform: translateY(-20px); }}
-                        to {{ opacity: 1; transform: translateY(0); }}
+                    @keyframes pop {{
+                        from {{ opacity: 0; transform: scale(0.85); }}
+                        to {{ opacity: 1; transform: scale(1); }}
                     }}
-                    .success-icon {{
-                        width: 80px;
-                        height: 80px;
-                        background: #00B900;
+                    .check-circle {{
+                        width: 72px;
+                        height: 72px;
+                        background: linear-gradient(135deg, #00d45e, #00b050);
                         border-radius: 50%;
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        margin: 0 auto 25px;
-                        font-size: 45px;
-                        color: white;
+                        margin: 0 auto 24px;
+                        font-size: 34px;
+                        box-shadow: 0 0 40px rgba(0, 212, 94, 0.3);
                     }}
-                    h2 {{ color: #333; margin-bottom: 20px; font-size: 26px; }}
-                    p {{ color: #666; font-size: 18px; line-height: 1.8; }}
-                    .back-notice {{
-                        margin-top: 30px;
-                        padding: 15px;
-                        background: #f8f9fa;
-                        border-radius: 8px;
-                        color: #555;
-                        font-size: 15px;
+                    h2 {{
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: #f0f0f8;
+                        margin-bottom: 10px;
                     }}
-                    .ranking-link {{
-                        display: inline-block;
-                        margin-top: 20px;
-                        padding: 12px 25px;
-                        background: linear-gradient(135deg, #667eea, #764ba2);
-                        color: white;
+                    p {{
+                        font-size: 14px;
+                        color: #8888aa;
+                        line-height: 1.7;
+                        margin-bottom: 28px;
+                    }}
+                    .ranking-btn {{
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 8px;
+                        padding: 13px 28px;
+                        background: linear-gradient(135deg, #4facfe, #00f2fe);
+                        color: #0a0a0f;
                         text-decoration: none;
-                        border-radius: 8px;
-                        font-weight: 600;
-                        transition: all 0.3s ease;
+                        border-radius: 100px;
+                        font-size: 14px;
+                        font-weight: 700;
+                        transition: all 0.25s;
+                        box-shadow: 0 4px 20px rgba(79,172,254,0.35);
                     }}
-                    .ranking-link:hover {{
+                    .ranking-btn:hover {{
                         transform: translateY(-2px);
-                        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+                        box-shadow: 0 6px 28px rgba(79,172,254,0.45);
+                    }}
+                    .back-note {{
+                        margin-top: 20px;
+                        font-size: 12px;
+                        color: #8888aa;
+                        opacity: 0.6;
                     }}
                 </style>
             </head>
             <body>
-                <div class="container">
-                    <div class="success-icon">✓</div>
+                <div class="card">
+                    <div class="check-circle">✓</div>
                     <h2>設定を保存しました！</h2>
-                    <p>「今すぐ」と送信すると課題が届きます。</p>
-                    <a href="{ranking_url}" class="ranking-link">🔥 ランキングを見る</a>
-                    <div class="back-notice">LINEの画面に戻ってください</div>
+                    <p>「今すぐ」と送信すると<br>新しい設定で課題が届きます。</p>
+                    <a href="{ranking_url}" class="ranking-btn">🔥 ランキングを見る</a>
+                    <div class="back-note">LINEの画面に戻ってください</div>
                 </div>
             </body>
             </html>
@@ -1368,205 +1610,624 @@ def settings():
 
         current_settings = get_user_settings(user_id)
         current_nickname = current_settings.get('nickname', '') or ''
-
-        level_options = ''
-        for level_name, level_info in USER_LEVELS.items():
-            selected = 'selected' if level_name == current_settings['level'] else ''
-            level_options += f'<option value="{level_name}" {selected}>{level_name}（{level_info["description"]}）</option>'
-
-        personality_options = ''
+        current_level = current_settings['level']
         current_personality = current_settings.get('coach_personality', '優しい')
 
-        for personality_name in COACH_PERSONALITIES:
-            selected = 'selected' if personality_name == current_personality else ''
-            personality_options += f'<option value="{personality_name}" {selected}>{personality_name}</option>'
+        # レベルデータをJSON用に整形
+        levels_json = []
+        for lname, linfo in USER_LEVELS.items():
+            levels_json.append({
+                "name": lname,
+                "desc": linfo["description"],
+                "selected": lname == current_level
+            })
+
+        # パーソナリティの絵文字マッピング
+        personality_emojis = {
+            "熱血": "🔥",
+            "優しい": "😊",
+            "厳しい": "💪",
+            "フレンドリー": "✌️",
+            "冷静": "🧠"
+        }
+
+        personality_descs = {
+            "熱血": "情熱的に鼓舞する",
+            "優しい": "丁寧で穏やかに",
+            "厳しい": "ストイックに追い込む",
+            "フレンドリー": "タメ口で親しみやすく",
+            "冷静": "論理的・分析的に"
+        }
 
         ranking_url = f"{APP_PUBLIC_URL}/ranking"
 
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>練習設定 - なわ太コーチ</title>
-            <style>
-                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-                body {{
-                    font-family: -apple-system, sans-serif;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
-                    padding: 20px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }}
-                .container {{
-                    max-width: 420px;
-                    width: 100%;
-                    background: white;
-                    padding: 35px 30px;
-                    border-radius: 20px;
-                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-                    animation: fadeIn 0.5s ease-out;
-                }}
-                @keyframes fadeIn {{
-                    from {{ opacity: 0; transform: translateY(20px); }}
-                    to {{ opacity: 1; transform: translateY(0); }}
-                }}
-                .header {{
-                    text-align: center;
-                    margin-bottom: 30px;
-                }}
-                .header-icon {{ font-size: 48px; margin-bottom: 10px; }}
-                h2 {{
-                    color: #2c3e50;
-                    font-size: 24px;
-                    font-weight: 600;
-                    margin-bottom: 8px;
-                }}
-                .subtitle {{ color: #7f8c8d; font-size: 14px; }}
-                .current-settings {{
-                    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                    padding: 15px;
-                    border-radius: 12px;
-                    margin-bottom: 25px;
-                    color: white;
-                    font-size: 14px;
-                    text-align: center;
-                }}
-                .current-settings strong {{ font-weight: 600; }}
-                .form-group {{ margin-bottom: 25px; }}
-                label {{
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    color: #2c3e50;
-                    font-weight: 600;
-                    font-size: 15px;
-                    margin-bottom: 10px;
-                }}
-                .label-icon {{ font-size: 18px; }}
-                select, input[type="text"] {{
-                    width: 100%;
-                    padding: 14px 16px;
-                    font-size: 16px;
-                    border: 2px solid #e0e0e0;
-                    border-radius: 12px;
-                    background-color: #f8f9fa;
-                    transition: all 0.3s ease;
-                    font-family: inherit;
-                }}
-                select {{
-                    cursor: pointer;
-                    appearance: none;
-                    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-                    background-repeat: no-repeat;
-                    background-position: right 12px center;
-                    background-size: 20px;
-                    padding-right: 40px;
-                }}
-                select:focus, input[type="text"]:focus {{
-                    outline: none;
-                    border-color: #667eea;
-                    background-color: white;
-                    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-                }}
-                .nickname-hint {{
-                    font-size: 12px;
-                    color: #7f8c8d;
-                    margin-top: 5px;
-                }}
-                button {{
-                    width: 100%;
-                    padding: 16px;
-                    background: linear-gradient(135deg, #00B900 0%, #00a000 100%);
-                    color: white;
-                    border: none;
-                    border-radius: 12px;
-                    font-size: 17px;
-                    font-weight: 600;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                    box-shadow: 0 4px 15px rgba(0, 185, 0, 0.3);
-                    margin-top: 10px;
-                }}
-                button:hover {{
-                    background: linear-gradient(135deg, #00a000 0%, #008f00 100%);
-                    transform: translateY(-2px);
-                    box-shadow: 0 6px 20px rgba(0, 185, 0, 0.4);
-                }}
-                button:active {{ transform: translateY(0); }}
-                .divider {{
-                    height: 1px;
-                    background: linear-gradient(to right, transparent, #e0e0e0, transparent);
-                    margin: 25px 0;
-                }}
-                .ranking-link {{
-                    display: block;
-                    text-align: center;
-                    margin-top: 15px;
-                    padding: 12px;
-                    background: linear-gradient(135deg, #667eea, #764ba2);
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 10px;
-                    font-weight: 600;
-                    transition: all 0.3s ease;
-                }}
-                .ranking-link:hover {{
-                    transform: translateY(-2px);
-                    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <div class="header-icon">🏋️</div>
-                    <h2>練習設定</h2>
-                    <p class="subtitle">レベルとコーチの性格を設定できます</p>
-                </div>
-                <div class="current-settings">
-                    現在の設定: <strong>{current_settings['level']}</strong>レベル（<strong>{current_personality}</strong>コーチ）<br>
-                    ニックネーム: <strong>{current_nickname or '未設定'}</strong>
-                </div>
-                <form method="POST">
-                    <div class="form-group">
-                        <label>
-                            <span class="label-icon">👤</span>
-                            ニックネーム（ランキング表示用）
-                        </label>
-                        <input type="text" name="nickname" value="{current_nickname}" maxlength="10" placeholder="例: ジャンプ太郎">
-                        <div class="nickname-hint">※ランキングに表示されます（10文字まで）</div>
-                    </div>
-                    <div class="divider"></div>
-                    <div class="form-group">
-                        <label>
-                            <span class="label-icon">🎯</span>
-                            レベル
-                        </label>
-                        <select name="level">
-                            {level_options}
-                        </select>
-                    </div>
-                    <div class="divider"></div>
-                    <div class="form-group">
-                        <label>
-                            <span class="label-icon">😊</span>
-                            コーチの性格
-                        </label>
-                        <select name="coach_personality">
-                            {personality_options}
-                        </select>
-                    </div>
-                    <button type="submit">💾 設定を保存する</button>
-                </form>
-                <a href="{ranking_url}" class="ranking-link">🔥 ランキングを見る</a>
+        html = f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>練習設定 — なわ太コーチ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg: #0a0a0f;
+            --card: #12121a;
+            --card2: #1a1a26;
+            --border: rgba(255,255,255,0.07);
+            --border-active: rgba(79,172,254,0.5);
+            --text: #f0f0f8;
+            --muted: #8888aa;
+            --accent: #4facfe;
+            --accent2: #00f2fe;
+            --green: #00d45e;
+            --fire: #ff6b35;
+        }}
+
+        * {{ margin:0; padding:0; box-sizing:border-box; }}
+
+        body {{
+            font-family: 'Noto Sans JP', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 0 0 60px;
+        }}
+
+        /* === トップバー === */
+        .topbar {{
+            padding: 20px 20px 0;
+            max-width: 520px;
+            margin: 0 auto;
+        }}
+
+        .topbar-inner {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }}
+
+        .app-logo {{
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 22px;
+            letter-spacing: 0.05em;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }}
+
+        .ranking-link-top {{
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            text-decoration: none;
+            padding: 6px 12px;
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            transition: all 0.2s;
+        }}
+
+        .ranking-link-top:hover {{
+            color: var(--text);
+            border-color: rgba(255,255,255,0.15);
+        }}
+
+        /* === メインラッパー === */
+        .wrapper {{
+            max-width: 520px;
+            margin: 0 auto;
+            padding: 28px 20px 0;
+        }}
+
+        /* === ページタイトル === */
+        .page-title {{
+            margin-bottom: 28px;
+        }}
+
+        .page-title h1 {{
+            font-size: 26px;
+            font-weight: 900;
+            color: var(--text);
+            margin-bottom: 4px;
+        }}
+
+        .page-title p {{
+            font-size: 13px;
+            color: var(--muted);
+        }}
+
+        /* === 現在の設定サマリー === */
+        .current-summary {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 14px 18px;
+            margin-bottom: 28px;
+        }}
+
+        .summary-avatar {{
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+        }}
+
+        .summary-text {{ flex: 1; min-width: 0; }}
+
+        .summary-name {{
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 2px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }}
+
+        .summary-detail {{
+            font-size: 12px;
+            color: var(--muted);
+        }}
+
+        .summary-edit-hint {{
+            font-size: 11px;
+            color: var(--accent);
+            opacity: 0.7;
+        }}
+
+        /* === セクション === */
+        .section {{
+            margin-bottom: 24px;
+        }}
+
+        .section-label {{
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--muted);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            padding-left: 2px;
+        }}
+
+        /* === ニックネームフィールド === */
+        .input-wrap {{
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }}
+
+        .input-wrap:focus-within {{
+            border-color: var(--border-active);
+            box-shadow: 0 0 0 3px rgba(79,172,254,0.08);
+        }}
+
+        .input-inner {{
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+        }}
+
+        .input-icon {{
+            font-size: 16px;
+            margin-right: 10px;
+            flex-shrink: 0;
+        }}
+
+        .input-field {{
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            font-family: 'Noto Sans JP', sans-serif;
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--text);
+            padding: 15px 0;
+        }}
+
+        .input-field::placeholder {{ color: var(--muted); font-weight: 400; }}
+
+        .input-counter {{
+            font-size: 11px;
+            color: var(--muted);
+            flex-shrink: 0;
+        }}
+
+        .input-hint {{
+            font-size: 11px;
+            color: var(--muted);
+            padding: 0 16px 10px;
+            opacity: 0.7;
+        }}
+
+        /* === レベル選択カード === */
+        .level-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }}
+
+        .level-card {{
+            background: var(--card);
+            border: 1.5px solid var(--border);
+            border-radius: 14px;
+            padding: 16px 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }}
+
+        .level-card:hover {{
+            border-color: rgba(79,172,254,0.3);
+            background: rgba(79,172,254,0.04);
+        }}
+
+        .level-card.active {{
+            border-color: var(--accent);
+            background: rgba(79,172,254,0.08);
+            box-shadow: 0 0 0 1px rgba(79,172,254,0.2), 0 4px 20px rgba(79,172,254,0.1);
+        }}
+
+        .level-check {{
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1.5px solid var(--muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: transparent;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }}
+
+        .level-card.active .level-check {{
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }}
+
+        .level-name {{
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 4px;
+        }}
+
+        .level-desc {{
+            font-size: 11px;
+            color: var(--muted);
+            line-height: 1.5;
+        }}
+
+        /* === コーチ性格選択 === */
+        .personality-grid {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+
+        .personality-card {{
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: var(--card);
+            border: 1.5px solid var(--border);
+            border-radius: 14px;
+            padding: 14px 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+
+        .personality-card:hover {{
+            border-color: rgba(79,172,254,0.3);
+            background: rgba(79,172,254,0.04);
+        }}
+
+        .personality-card.active {{
+            border-color: var(--accent);
+            background: rgba(79,172,254,0.08);
+        }}
+
+        .personality-emoji {{
+            font-size: 24px;
+            flex-shrink: 0;
+            width: 36px;
+            text-align: center;
+        }}
+
+        .personality-info {{ flex: 1; }}
+
+        .personality-name {{
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text);
+            margin-bottom: 2px;
+        }}
+
+        .personality-desc {{
+            font-size: 12px;
+            color: var(--muted);
+        }}
+
+        .personality-radio {{
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1.5px solid var(--muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all 0.2s;
+        }}
+
+        .personality-card.active .personality-radio {{
+            border-color: var(--accent);
+            background: var(--accent);
+        }}
+
+        .personality-card.active .personality-radio::after {{
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: white;
+            border-radius: 50%;
+        }}
+
+        /* hidden inputs */
+        .hidden-input {{ display: none; }}
+
+        /* === 保存ボタン === */
+        .save-btn {{
+            width: 100%;
+            padding: 17px;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: #0a0a0f;
+            border: none;
+            border-radius: 14px;
+            font-family: 'Noto Sans JP', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: all 0.25s;
+            box-shadow: 0 4px 20px rgba(79,172,254,0.3);
+            letter-spacing: 0.03em;
+        }}
+
+        .save-btn:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 28px rgba(79,172,254,0.45);
+        }}
+
+        .save-btn:active {{ transform: translateY(0); }}
+
+        /* === 区切り線 === */
+        .divider {{
+            height: 1px;
+            background: var(--border);
+            margin: 28px 0;
+        }}
+
+        /* === ランキングバナー === */
+        .ranking-banner {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(135deg, rgba(255,107,53,0.1), rgba(245,200,66,0.08));
+            border: 1px solid rgba(255,107,53,0.2);
+            border-radius: 14px;
+            padding: 16px 18px;
+            text-decoration: none;
+            transition: all 0.25s;
+            margin-top: 12px;
+        }}
+
+        .ranking-banner:hover {{
+            background: linear-gradient(135deg, rgba(255,107,53,0.15), rgba(245,200,66,0.12));
+            transform: translateY(-2px);
+        }}
+
+        .ranking-banner-left {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+
+        .ranking-banner-icon {{ font-size: 28px; }}
+
+        .ranking-banner-title {{
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text);
+        }}
+
+        .ranking-banner-sub {{
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+        }}
+
+        .ranking-banner-arrow {{
+            font-size: 18px;
+            color: var(--muted);
+        }}
+
+        @media (max-width: 400px) {{
+            .level-grid {{ grid-template-columns: 1fr; }}
+        }}
+    </style>
+</head>
+<body>
+
+    <!-- トップバー -->
+    <div class="topbar">
+        <div class="topbar-inner">
+            <div class="app-logo">なわ太コーチ</div>
+            <a href="{ranking_url}" class="ranking-link-top">🔥 ランキング</a>
+        </div>
+    </div>
+
+    <div class="wrapper">
+
+        <!-- ページタイトル -->
+        <div class="page-title">
+            <h1>⚙️ 練習設定</h1>
+            <p>あなたに合ったコーチと課題をカスタマイズ</p>
+        </div>
+
+        <!-- 現在の設定サマリー -->
+        <div class="current-summary">
+            <div class="summary-avatar">🤸</div>
+            <div class="summary-text">
+                <div class="summary-name">{current_nickname or '名前を設定しよう'}</div>
+                <div class="summary-detail">{current_level} ・ {current_personality}コーチ</div>
             </div>
-        </body>
-        </html>
-        """
+            <div class="summary-edit-hint">編集中</div>
+        </div>
+
+        <form method="POST" id="settingsForm">
+            <!-- hidden フォーム inputs (JSで更新) -->
+            <input type="hidden" name="level" id="levelInput" value="{current_level}">
+            <input type="hidden" name="coach_personality" id="personalityInput" value="{current_personality}">
+
+            <!-- ニックネーム -->
+            <div class="section">
+                <div class="section-label">ニックネーム</div>
+                <div class="input-wrap">
+                    <div class="input-inner">
+                        <span class="input-icon">✏️</span>
+                        <input
+                            type="text"
+                            name="nickname"
+                            class="input-field"
+                            value="{current_nickname}"
+                            maxlength="10"
+                            placeholder="例：ジャンプ太郎"
+                            id="nicknameInput"
+                            oninput="updateCounter(this)"
+                        >
+                        <span class="input-counter" id="charCounter">{len(current_nickname)}/10</span>
+                    </div>
+                    <div class="input-hint">ランキングに表示されます（10文字まで）</div>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- レベル -->
+            <div class="section">
+                <div class="section-label">🎯 練習レベル</div>
+                <div class="level-grid" id="levelGrid">
+"""
+
+        # レベルカードを動的に生成
+        for lname, linfo in USER_LEVELS.items():
+            is_active = 'active' if lname == current_level else ''
+            html += f"""
+                    <div class="level-card {is_active}" onclick="selectLevel('{lname}', this)">
+                        <div class="level-check">✓</div>
+                        <div class="level-name">{lname}</div>
+                        <div class="level-desc">{linfo['description']}</div>
+                    </div>
+"""
+
+        html += """
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- コーチの性格 -->
+            <div class="section">
+                <div class="section-label">😊 コーチの性格</div>
+                <div class="personality-grid" id="personalityGrid">
+"""
+
+        # パーソナリティカードを動的に生成
+        personality_emojis = {"熱血": "🔥", "優しい": "😊", "厳しい": "💪", "フレンドリー": "✌️", "冷静": "🧠"}
+        personality_descs_map = {"熱血": "情熱的に鼓舞する", "優しい": "丁寧で穏やかに", "厳しい": "ストイックに追い込む", "フレンドリー": "タメ口で親しみやすく", "冷静": "論理的・分析的に"}
+
+        for pname in COACH_PERSONALITIES:
+            is_active = 'active' if pname == current_personality else ''
+            emoji = personality_emojis.get(pname, "😊")
+            desc = personality_descs_map.get(pname, "")
+            html += f"""
+                    <div class="personality-card {is_active}" onclick="selectPersonality('{pname}', this)">
+                        <div class="personality-emoji">{emoji}</div>
+                        <div class="personality-info">
+                            <div class="personality-name">{pname}</div>
+                            <div class="personality-desc">{desc}</div>
+                        </div>
+                        <div class="personality-radio"></div>
+                    </div>
+"""
+
+        html += f"""
+                </div>
+            </div>
+
+            <!-- 保存ボタン -->
+            <button type="submit" class="save-btn">💾 設定を保存する</button>
+        </form>
+
+        <!-- ランキングバナー -->
+        <a href="{ranking_url}" class="ranking-banner">
+            <div class="ranking-banner-left">
+                <div class="ranking-banner-icon">🏆</div>
+                <div>
+                    <div class="ranking-banner-title">連続記録ランキング</div>
+                    <div class="ranking-banner-sub">みんなの記録をチェック！</div>
+                </div>
+            </div>
+            <div class="ranking-banner-arrow">›</div>
+        </a>
+
+    </div>
+
+    <script>
+        // 文字数カウンター
+        function updateCounter(input) {{
+            document.getElementById('charCounter').textContent = input.value.length + '/10';
+        }}
+
+        // レベル選択
+        function selectLevel(name, el) {{
+            document.querySelectorAll('.level-card').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById('levelInput').value = name;
+        }}
+
+        // パーソナリティ選択
+        function selectPersonality(name, el) {{
+            document.querySelectorAll('.personality-card').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            document.getElementById('personalityInput').value = name;
+        }}
+    </script>
+</body>
+</html>
+"""
 
         return render_template_string(html)
 
