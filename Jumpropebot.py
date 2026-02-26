@@ -24,7 +24,7 @@ BOOTH_SUPPORT_URL = "https://visai.booth.pm/items/7763380"
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")  # service_role キーを推奨（RLS回避のため）
-LOGO_IMAGE_URL = os.environ.get("LOGO_IMAGE_URL")
+LOGO_IMAGE_URL = "logo.png"
 
 # ★ オリジナルスタンプの画像URL（後で設定）
 WELCOME_STAMP_URL = os.environ.get("WELCOME_STAMP_URL", "https://example.com/welcome_stamp.png")
