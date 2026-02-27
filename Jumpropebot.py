@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from pytz import timezone
-from flask import Flask, request, abort, render_template_string, jsonify, send_from_directory
+from flask import Flask, request, abort, render_template_string, jsonify
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
@@ -860,18 +860,6 @@ def get_ranking_data():
         return []
 
 
-# ==========================================
-# ロゴ静的配信 & ロゴHTML
-# ==========================================
-@app.route("/logo.png")
-def serve_logo():
-    """logo.png を main.py と同じディレクトリから配信"""
-    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "logo.png")
-
-def get_logo_html(height="32px"):
-    return f'<img src="/logo.png" alt="なわ太コーチ" style="height:{height};width:auto;object-fit:contain;display:block;">'
-
-
 
 # ==========================================
 # 共通CSSテーマ（落ち着いたダークトーン）
@@ -1063,7 +1051,6 @@ body {
 def ranking():
     """ランキングページ"""
     ranking_data = get_ranking_data()
-    logo_html = get_logo_html(height="30px")
 
     html = """<!DOCTYPE html>
 <html lang="ja">
@@ -1366,7 +1353,6 @@ def ranking():
 
 <nav class="nav">
     <div class="nav-in">
-        """ + logo_html + """
         <button class="ghost-btn" onclick="location.reload()">
             ↻ &nbsp;更新
         </button>
@@ -1480,7 +1466,6 @@ def settings():
     """設定画面"""
     try:
         user_id = request.args.get('user_id')
-        logo_html = get_logo_html(height="30px")
 
         if not user_id:
             return f"""<!DOCTYPE html>
@@ -1516,7 +1501,6 @@ def settings():
 </style>
 </head>
 <body class="body-center">
-<nav class="nav"><div class="nav-in">{logo_html}</div></nav>
 <div class="center">
 <div class="err-card">
 <div class="err-ic">⚠️</div>
@@ -1612,7 +1596,6 @@ def settings():
 </style>
 </head>
 <body class="body-center">
-<nav class="nav"><div class="nav-in">{logo_html}</div></nav>
 <div class="center">
 <div class="done-card">
 <div class="check-circle">✓</div>
@@ -1891,7 +1874,6 @@ def settings():
 
 <nav class="nav">
     <div class="nav-in">
-        {logo_html}
         <a href="{ranking_url}" class="nav-link">🏆 ランキング</a>
     </div>
 </nav>
