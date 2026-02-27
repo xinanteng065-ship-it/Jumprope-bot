@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from pytz import timezone
-from flask import Flask, request, abort, render_template_string, jsonify
+from flask import Flask, request, abort, render_template_string, jsonify, send_from_directory
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
@@ -861,10 +861,15 @@ def get_ranking_data():
 
 
 # ==========================================
-# ロゴHTML
+# ロゴ静的配信 & ロゴHTML
 # ==========================================
+@app.route("/logo.png")
+def serve_logo():
+    """logo.png を main.py と同じディレクトリから配信"""
+    return send_from_directory(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+
 def get_logo_html(height="32px"):
-    return f'<img src="logo.png" alt="なわ太コーチ" style="height:{height};width:auto;object-fit:contain;display:block;">'
+    return f'<img src="/logo.png" alt="なわ太コーチ" style="height:{height};width:auto;object-fit:contain;display:block;">'
 
 
 
