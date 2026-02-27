@@ -12,7 +12,7 @@ from openai import OpenAI
 from supabase import create_client, Client
 
 app = Flask(__name__)
- 
+
 # ==========================================
 # 環境変数の読み込み
 # ==========================================
@@ -23,10 +23,10 @@ APP_PUBLIC_URL = os.environ.get("APP_PUBLIC_URL", "https://jumprope-bot.onrender
 BOOTH_SUPPORT_URL = "https://visai.booth.pm/items/7763380"
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")  # service_role キーを推奨（RLS回避のため）
-LOGO_IMAGE_URL = "logo.png"
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+LOGO_IMAGE_URL = os.environ.get("LOGO_IMAGE_URL", "logo.png")
 
-# ★ オリジナルスタンプの画像URL（後で設定）
+# ★ オリジナルスタンプの画像URL
 WELCOME_STAMP_URL = os.environ.get("WELCOME_STAMP_URL", "https://example.com/welcome_stamp.png")
 
 if not all([LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, OPENAI_API_KEY]):
@@ -88,20 +88,6 @@ COACH_PERSONALITIES = ["熱血", "優しい", "厳しい", "フレンドリー",
 #     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 #     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 # );
-#
-# -- updated_at を自動更新するトリガー（任意）
-# CREATE OR REPLACE FUNCTION update_updated_at_column()
-# RETURNS TRIGGER AS $$
-# BEGIN
-#     NEW.updated_at = NOW();
-#     RETURN NEW;
-# END;
-# $$ language 'plpgsql';
-#
-# CREATE TRIGGER update_users_updated_at
-#     BEFORE UPDATE ON users
-#     FOR EACH ROW
-#     EXECUTE FUNCTION update_updated_at_column();
 
 # ==========================================
 # ユーザー設定の取得
@@ -116,7 +102,6 @@ def get_user_settings(user_id):
         ).eq("user_id", user_id).execute()
 
         if not response.data:
-            # 新規ユーザーを作成
             new_user = {
                 "user_id": user_id,
                 "level": "初心者",
@@ -182,7 +167,6 @@ def update_user_settings(user_id, level=None, coach_personality=None, nickname=N
     try:
         print(f"🔧 Updating settings for {user_id[:8]}...")
 
-        # 現在の設定を取得
         response = supabase.table("users").select(
             "level, coach_personality, nickname"
         ).eq("user_id", user_id).execute()
@@ -196,7 +180,6 @@ def update_user_settings(user_id, level=None, coach_personality=None, nickname=N
             update_data["nickname"] = nickname if nickname is not None else row.get("nickname")
             supabase.table("users").update(update_data).eq("user_id", user_id).execute()
         else:
-            # 新規ユーザー
             new_user = {
                 "user_id": user_id,
                 "level": level or "初心者",
@@ -238,9 +221,7 @@ def update_streak(user_id):
             current_streak = row.get("streak_days") or 0
             last_date = row.get("last_challenge_date")
 
-        # 連続記録の判定
         if last_date == today:
-            # 今日すでに課題をもらっている場合は何もしない
             return current_streak
         elif last_date:
             last_dt = datetime.strptime(last_date, "%Y-%m-%d")
@@ -272,7 +253,6 @@ def update_streak(user_id):
 def increment_delivery_count(user_id, challenge_text):
     """配信回数を1増やし、課題を記録"""
     try:
-        # まず現在の値を取得してインクリメント
         response = supabase.table("users").select("delivery_count").eq("user_id", user_id).execute()
         if response.data:
             current_count = response.data[0].get("delivery_count", 0) or 0
@@ -838,7 +818,6 @@ def create_challenge_message(user_id, level):
         settings = get_user_settings(user_id)
         coach_personality = settings.get('coach_personality', '優しい')
 
-        # 連続記録を更新
         streak_days = update_streak(user_id)
 
         challenge = generate_challenge_with_ai(level, settings, coach_personality, streak_days)
@@ -879,274 +858,532 @@ def get_ranking_data():
         print(f"❌ get_ranking_data error: {e}")
         return []
 
+
+# ==========================================
+# ロゴHTMLを生成するヘルパー関数
+# ==========================================
+def get_logo_html(height="32px"):
+    """
+    LOGO_IMAGE_URL が設定されていれば <img> タグを、
+    未設定またはデフォルト値の場合はテキストロゴを返す。
+    """
+    if LOGO_IMAGE_URL and LOGO_IMAGE_URL.strip():
+        return (
+            f'<img src="{LOGO_IMAGE_URL}" alt="なわ太コーチ" '
+            f'style="height:{height};width:auto;object-fit:contain;display:block;vertical-align:middle;">'
+        )
+    return '<span class="logo-text">🪢 なわ太コーチ</span>'
+
+
+# ==========================================
+# 共通CSSテーマ（落ち着いたダークトーン）
+# ==========================================
+COMMON_THEME_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@500;700&display=swap');
+
+:root {
+    /* ── Palette ── */
+    --ink:        #0f1117;
+    --ink-mid:    #1e2130;
+    --ink-soft:   #2c3147;
+    --surface:    #191d2b;
+    --card:       #1e2235;
+    --card-hov:   #232840;
+    --border:     rgba(255,255,255,0.07);
+    --border-hi:  rgba(255,255,255,0.14);
+    --text:       #e8ecf4;
+    --text-mid:   #9ba3bb;
+    --text-soft:  #636b82;
+    --accent:     #c8a97e;        /* warm gold */
+    --accent-hi:  #dbbf98;
+    --accent-lo:  rgba(200,169,126,0.12);
+    --accent-lo2: rgba(200,169,126,0.06);
+    --green:      #5fb88a;
+    --green-lo:   rgba(95,184,138,0.12);
+    --red:        #e07070;
+    --blue:       #6e9ed4;
+    --blue-lo:    rgba(110,158,212,0.12);
+    /* ── Gold medals ── */
+    --gold:       #d4a843;
+    --gold-lo:    rgba(212,168,67,0.14);
+    --silver:     #8ea0b8;
+    --silver-lo:  rgba(142,160,184,0.14);
+    --bronze:     #b07a52;
+    --bronze-lo:  rgba(176,122,82,0.14);
+    /* ── Spacing / radius ── */
+    --r:   10px;
+    --r-lg:16px;
+    --r-xl:22px;
+    --sh:  0 2px 8px rgba(0,0,0,0.35), 0 8px 32px rgba(0,0,0,0.25);
+    --sh2: 0 4px 24px rgba(0,0,0,0.55);
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+    font-family: 'Noto Sans JP', sans-serif;
+    background: var(--ink);
+    color: var(--text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    /* subtle noise texture */
+    background-image:
+        radial-gradient(ellipse 80% 60% at 10% 0%, rgba(200,169,126,0.05) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 90% 100%, rgba(110,158,212,0.04) 0%, transparent 60%);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--ink); }
+::-webkit-scrollbar-thumb { background: var(--ink-soft); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-soft); }
+
+/* ── Navbar ── */
+.nav {
+    background: rgba(15,17,23,0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 200;
+}
+.nav-in {
+    max-width: 800px; margin: 0 auto;
+    height: 58px;
+    padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.logo-text {
+    font-family: 'DM Serif Display', serif;
+    font-size: 17px;
+    color: var(--text);
+    letter-spacing: 0.01em;
+}
+.nav-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 16px;
+    border: 1px solid var(--border-hi);
+    border-radius: 100px;
+    font-size: 12px; font-weight: 500; color: var(--text-mid);
+    text-decoration: none;
+    transition: all .2s;
+    letter-spacing: 0.03em;
+}
+.nav-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-lo2);
+}
+
+/* ── Utility button ── */
+.ghost-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 16px;
+    border: 1px solid var(--border-hi);
+    border-radius: 100px;
+    background: transparent;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 12px; font-weight: 500; color: var(--text-mid);
+    cursor: pointer;
+    transition: all .2s;
+    letter-spacing: 0.03em;
+}
+.ghost-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-lo2);
+}
+
+/* ── Page wrapper ── */
+.wrap {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+}
+
+/* ── Section label ── */
+.sec-lbl {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-soft);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    padding-left: 2px;
+}
+
+/* ── Card ── */
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh);
+}
+.card:hover { border-color: var(--border-hi); }
+
+/* ── Divider ── */
+.divider {
+    height: 1px;
+    background: var(--border);
+    margin: 28px 0;
+}
+
+/* ── Tag / pill ── */
+.pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--accent-lo);
+    color: var(--accent);
+    letter-spacing: 0.02em;
+}
+
+/* ── Animations ── */
+@keyframes fadeUp {
+    from { opacity:0; transform:translateY(10px); }
+    to   { opacity:1; transform:translateY(0); }
+}
+@keyframes scaleIn {
+    from { opacity:0; transform:scale(.9); }
+    to   { opacity:1; transform:scale(1); }
+}
+
+/* ── Responsive ── */
+@media(max-width:520px) {
+    .wrap { padding: 24px 16px 60px; }
+    .nav-in { padding: 0 16px; }
+}
+"""
+
+# ==========================================
+# ランキングページ
+# ==========================================
 @app.route("/ranking")
 def ranking():
-    """ランキングページ - 明るいクリーンデザイン"""
+    """ランキングページ"""
     ranking_data = get_ranking_data()
-
-    # ロゴHTML（環境変数 LOGO_IMAGE_URL が設定されていれば画像、なければテキスト）
-    if LOGO_IMAGE_URL:
-        logo_html = f'<img src="{LOGO_IMAGE_URL}" alt="なわ太コーチ" style="height:30px;width:auto;object-fit:contain;display:block;">'
-    else:
-        logo_html = '<span style="font-size:15px;font-weight:700;color:#1e293b;">🪢 なわ太コーチ</span>'
+    logo_html = get_logo_html(height="30px")
 
     html = """<!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>連続記録ランキング — なわ太コーチ</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=Barlow+Condensed:wght@700;900&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg:       #f1f5f9;
-            --surface:  #ffffff;
-            --surf2:    #f8fafc;
-            --border:   #e2e8f0;
-            --text:     #1e293b;
-            --muted:    #64748b;
-            --accent:   #f97316;
-            --acc2:     #fb923c;
-            --gold:     #f59e0b;
-            --silver:   #94a3b8;
-            --bronze:   #b87333;
-            --r:        14px;
-            --sh:       0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.06);
-            --sh2:      0 8px 32px rgba(0,0,0,0.11);
-        }
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body {
-            font-family: "Noto Sans JP", sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Streak Ranking — なわ太コーチ</title>
+<style>
+""" + COMMON_THEME_CSS + """
 
-        /* ─── ナビバー ─── */
-        .nav {
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            position: sticky; top:0; z-index:99;
-            padding: 0 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .nav-in {
-            max-width: 740px; margin: 0 auto;
-            height: 56px;
-            display: flex; align-items: center; justify-content: space-between;
-        }
-        .refresh-btn {
-            display: inline-flex; align-items: center; gap: 6px;
-            padding: 7px 16px;
-            background: var(--surf2); border: 1px solid var(--border);
-            border-radius: 100px;
-            font-size: 12px; font-weight: 600; color: var(--muted);
-            cursor: pointer; font-family: inherit; transition: .2s;
-        }
-        .refresh-btn:hover { background: var(--border); color: var(--text); }
-        .spin { display: inline-block; transition: transform .5s; }
-        .refresh-btn:hover .spin { transform: rotate(180deg); }
+/* ════════════════════════════════════
+   ランキング専用スタイル
+════════════════════════════════════ */
 
-        /* ─── ヒーローバナー ─── */
-        .hero {
-            background: linear-gradient(135deg, #fff7ed 0%, #ffffff 50%, #eff6ff 100%);
-            border-bottom: 1px solid var(--border);
-            padding: 32px 20px 28px;
-        }
-        .hero-in {
-            max-width: 740px; margin: 0 auto;
-            display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
-        }
-        .hero-title {
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: clamp(44px, 10vw, 64px);
-            font-weight: 900;
-            line-height: .92;
-            letter-spacing: .01em;
-            color: var(--text);
-        }
-        .hero-title .hl { color: var(--accent); }
-        .hero-stat { text-align: right; padding-bottom: 4px; }
-        .hero-stat-num {
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: 36px; font-weight: 900;
-            color: var(--text); line-height: 1;
-        }
-        .hero-stat-lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* ── Hero ── */
+.hero {
+    border-bottom: 1px solid var(--border);
+    padding: 48px 24px 40px;
+    position: relative;
+    overflow: hidden;
+}
+.hero::before {
+    content: '';
+    position: absolute;
+    top: -40%; left: 50%;
+    transform: translateX(-50%);
+    width: 600px; height: 400px;
+    background: radial-gradient(ellipse, rgba(200,169,126,0.08) 0%, transparent 70%);
+    pointer-events: none;
+}
+.hero-in {
+    max-width: 800px; margin: 0 auto;
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 20px;
+    position: relative;
+}
+.hero-eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+.hero-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: clamp(40px, 9vw, 68px);
+    line-height: 0.95;
+    color: var(--text);
+    letter-spacing: -0.01em;
+}
+.hero-title em {
+    font-style: italic;
+    color: var(--accent);
+}
+.hero-stat {
+    text-align: right;
+    padding-bottom: 6px;
+    flex-shrink: 0;
+}
+.hero-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 42px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+}
+.hero-lbl {
+    font-size: 11px;
+    color: var(--text-soft);
+    margin-top: 4px;
+    letter-spacing: 0.06em;
+}
 
-        /* ─── コンテンツ ─── */
-        .wrap { max-width: 740px; margin: 0 auto; padding: 24px 20px 60px; }
+/* ── Podium ── */
+.podium-section {
+    margin-bottom: 24px;
+}
+.podium {
+    display: grid;
+    grid-template-columns: 1fr 1.08fr 1fr;
+    gap: 12px;
+    align-items: end;
+}
+.pod {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 24px 14px 20px;
+    text-align: center;
+    box-shadow: var(--sh);
+    transition: transform .25s, box-shadow .25s, border-color .25s;
+    position: relative;
+    overflow: hidden;
+    animation: fadeUp .5s ease both;
+}
+.pod:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--sh2);
+}
+.pod::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+}
+.pod-1 { border-color: rgba(212,168,67,0.25); animation-delay: .05s; }
+.pod-1::after { background: linear-gradient(90deg, transparent, var(--gold), transparent); }
+.pod-1::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(212,168,67,0.06) 0%, transparent 70%);
+    pointer-events: none;
+}
+.pod-2 { animation-delay: .0s; }
+.pod-2::after { background: linear-gradient(90deg, transparent, var(--silver), transparent); }
+.pod-3 { animation-delay: .10s; }
+.pod-3::after { background: linear-gradient(90deg, transparent, var(--bronze), transparent); }
 
-        /* ─── 表彰台 ─── */
-        .podium { display: grid; grid-template-columns: 1fr 1.12fr 1fr; gap: 10px; margin-bottom: 20px; align-items: end; }
-        .pod {
-            background: var(--surface);
-            border: 1.5px solid var(--border);
-            border-radius: var(--r);
-            padding: 22px 12px 18px;
-            text-align: center;
-            box-shadow: var(--sh);
-            transition: .25s;
-            position: relative; overflow: hidden;
-        }
-        .pod::after { content:""; position:absolute; bottom:0; left:0; right:0; height:3px; }
-        .pod:hover { transform: translateY(-5px); box-shadow: var(--sh2); }
+/* アバター */
+.pod-av {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    margin: 0 auto 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Serif Display', serif;
+    font-size: 20px;
+    border: 1.5px solid;
+}
+.pod-1 .pod-av { width: 60px; height: 60px; font-size: 24px; }
+.av-gold   { background: rgba(212,168,67,0.12);  border-color: rgba(212,168,67,0.4);  color: var(--gold); }
+.av-silver { background: rgba(142,160,184,0.1);  border-color: rgba(142,160,184,0.3); color: var(--silver); }
+.av-bronze { background: rgba(176,122,82,0.1);   border-color: rgba(176,122,82,0.3);  color: var(--bronze); }
+.av-def    { background: rgba(110,158,212,0.1);  border-color: rgba(110,158,212,0.25);color: var(--blue); }
 
-        .pod-1 { background: linear-gradient(170deg,#fffbeb,#fff); border-color: rgba(245,158,11,.3); }
-        .pod-1::after { background: var(--gold); }
-        .pod-2 { background: linear-gradient(170deg,#f8fafc,#fff); border-color: rgba(148,163,184,.3); }
-        .pod-2::after { background: var(--silver); }
-        .pod-3 { background: linear-gradient(170deg,#fdf8f0,#fff); border-color: rgba(184,115,51,.3); }
-        .pod-3::after { background: var(--bronze); }
+.pod-rank {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+.pod-1 .pod-rank { color: var(--gold); }
+.pod-2 .pod-rank { color: var(--silver); }
+.pod-3 .pod-rank { color: var(--bronze); }
 
-        /* アバター */
-        .pod-av {
-            width: 52px; height: 52px; border-radius: 50%;
-            margin: 0 auto 10px;
-            display: flex; align-items: center; justify-content: center;
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: 22px; font-weight: 900;
-            border: 2.5px solid rgba(0,0,0,.07);
-        }
-        .pod-1 .pod-av { width: 62px; height: 62px; font-size: 26px; border-color: var(--gold); }
-        .av-g { background: linear-gradient(135deg,#fde68a,#f59e0b); color: #78350f; }
-        .av-s { background: linear-gradient(135deg,#e2e8f0,#94a3b8); color: #334155; }
-        .av-b { background: linear-gradient(135deg,#fde8cc,#b87333); color: #7c2d12; }
-        .av-n { background: linear-gradient(135deg,#dbeafe,#3b82f6); color: #1e3a8a; }
+.pod-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+    word-break: break-word;
+    line-height: 1.4;
+}
+.pod-1 .pod-name { font-size: 14px; }
 
-        .pod-medal { font-size: 22px; display: block; margin-bottom: 4px; }
-        .pod-1 .pod-medal { font-size: 28px; }
-        .pod-place {
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: 10px; font-weight: 700; letter-spacing: .18em;
-            margin-bottom: 5px;
-        }
-        .pod-1 .pod-place { color: var(--gold); }
-        .pod-2 .pod-place { color: var(--silver); }
-        .pod-3 .pod-place { color: var(--bronze); }
-        .pod-name { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 8px; word-break: break-word; line-height: 1.4; }
-        .pod-1 .pod-name { font-size: 14px; }
-        .pod-num {
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: 40px; font-weight: 900; line-height: 1;
-        }
-        .pod-1 .pod-num { font-size: 50px; color: var(--gold); }
-        .pod-2 .pod-num { color: var(--silver); }
-        .pod-3 .pod-num { color: var(--bronze); }
-        .pod-unit { font-size: 11px; color: var(--muted); margin-top: 2px; }
-        .pod-lv { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 100px; margin-top: 8px; background: rgba(0,0,0,.05); color: var(--muted); }
+.pod-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1;
+}
+.pod-1 .pod-num { font-size: 48px; color: var(--gold); }
+.pod-2 .pod-num { color: var(--silver); }
+.pod-3 .pod-num { color: var(--bronze); }
+.pod-unit { font-size: 11px; color: var(--text-soft); margin-top: 4px; }
 
-        /* ─── ランキングリスト ─── */
-        .rank-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--r);
-            box-shadow: var(--sh);
-            overflow: hidden;
-        }
-        .rank-head {
-            display: grid; grid-template-columns: 52px 1fr auto;
-            padding: 10px 20px;
-            background: var(--surf2);
-            border-bottom: 1px solid var(--border);
-            font-size: 10px; font-weight: 700; color: var(--muted);
-            letter-spacing: .1em; text-transform: uppercase;
-        }
-        .rank-row {
-            display: grid; grid-template-columns: 52px 1fr auto;
-            align-items: center;
-            padding: 13px 20px;
-            border-bottom: 1px solid var(--border);
-            transition: background .15s;
-            animation: slide .35s ease both;
-        }
-        @keyframes slide { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-        .rank-row:last-child { border-bottom: none; }
-        .rank-row:hover { background: var(--surf2); }
-        .rank-row:nth-child(1){animation-delay:.04s} .rank-row:nth-child(2){animation-delay:.08s}
-        .rank-row:nth-child(3){animation-delay:.11s} .rank-row:nth-child(4){animation-delay:.14s}
-        .rank-row:nth-child(5){animation-delay:.17s} .rank-row:nth-child(6){animation-delay:.20s}
-        .rank-row:nth-child(7){animation-delay:.23s} .rank-row:nth-child(8){animation-delay:.26s}
-        .rank-row:nth-child(9){animation-delay:.29s} .rank-row:nth-child(10){animation-delay:.32s}
+.pod-lv {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 9px;
+    border-radius: 100px;
+    background: var(--accent-lo2);
+    color: var(--text-soft);
+    letter-spacing: 0.04em;
+}
 
-        .pos {
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: 22px; font-weight: 700;
-            color: var(--muted); text-align: center;
-        }
-        .rank-row:nth-child(1) .pos { color: var(--gold); }
-        .rank-row:nth-child(2) .pos { color: var(--silver); }
-        .rank-row:nth-child(3) .pos { color: var(--bronze); }
+/* ── List table ── */
+.rank-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--sh);
+    overflow: hidden;
+}
+.rank-head {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-soft);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+.rank-row {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    transition: background .15s;
+    animation: fadeUp .4s ease both;
+}
+.rank-row:last-child { border-bottom: none; }
+.rank-row:hover { background: rgba(255,255,255,0.025); }
+{% for i in range(15) %}
+.rank-row:nth-child({{ i + 1 }}) { animation-delay: {{ i * 0.04 }}s; }
+{% endfor %}
 
-        .user-cell { display: flex; align-items: center; gap: 11px; min-width: 0; }
-        .list-av {
-            width: 38px; height: 38px; border-radius: 50%;
-            flex-shrink: 0;
-            display: flex; align-items: center; justify-content: center;
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: 15px; font-weight: 900;
-            border: 2px solid var(--border);
-        }
-        .rank-row:nth-child(1) .list-av { border-color: var(--gold); }
-        .rank-row:nth-child(2) .list-av { border-color: var(--silver); }
-        .rank-row:nth-child(3) .list-av { border-color: var(--bronze); }
+/* 順位数字 */
+.pos {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-soft);
+    text-align: center;
+}
+.rank-row:nth-child(1) .pos { color: var(--gold); }
+.rank-row:nth-child(2) .pos { color: var(--silver); }
+.rank-row:nth-child(3) .pos { color: var(--bronze); }
 
-        .u-name { font-size: 14px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .u-lv { font-size: 11px; color: var(--muted); margin-top: 1px; }
+/* ユーザーセル */
+.user-cell {
+    display: flex; align-items: center; gap: 12px;
+    min-width: 0;
+}
+.list-av {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Serif Display', serif;
+    font-size: 15px;
+    border: 1.5px solid var(--border-hi);
+}
+.rank-row:nth-child(1) .list-av { border-color: rgba(212,168,67,0.4); }
+.rank-row:nth-child(2) .list-av { border-color: rgba(142,160,184,0.3); }
+.rank-row:nth-child(3) .list-av { border-color: rgba(176,122,82,0.3); }
 
-        .badge {
-            display: flex; align-items: center; gap: 5px;
-            padding: 6px 13px;
-            background: #fff7ed;
-            border: 1px solid rgba(249,115,22,.2);
-            border-radius: 100px; white-space: nowrap;
-        }
-        .rank-row:nth-child(1) .badge { background: #fffbeb; border-color: rgba(245,158,11,.3); }
-        .rank-row:nth-child(2) .badge { background: #f8fafc; border-color: rgba(148,163,184,.3); }
-        .rank-row:nth-child(3) .badge { background: #fdf8f0; border-color: rgba(184,115,51,.3); }
-        .b-num {
-            font-family: "Barlow Condensed", sans-serif;
-            font-size: 20px; font-weight: 900; color: var(--accent); line-height: 1;
-        }
-        .rank-row:nth-child(1) .b-num { color: var(--gold); }
-        .rank-row:nth-child(2) .b-num { color: var(--silver); }
-        .rank-row:nth-child(3) .b-num { color: var(--bronze); }
-        .b-unit { font-size: 11px; color: var(--muted); }
+.u-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.u-lv {
+    font-size: 11px;
+    color: var(--text-soft);
+    margin-top: 2px;
+}
 
-        .empty { text-align: center; padding: 60px 20px; }
-        .empty-ic { font-size: 52px; opacity: .2; margin-bottom: 16px; }
-        .empty-t { font-size: 16px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
-        .empty-s { font-size: 13px; color: var(--muted); opacity: .7; }
-        .footer { text-align: center; margin-top: 32px; font-size: 12px; color: var(--muted); }
+/* ストリークバッジ */
+.streak-badge {
+    display: flex; align-items: baseline; gap: 3px;
+}
+.s-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+}
+.rank-row:nth-child(1) .s-num { color: var(--gold); }
+.rank-row:nth-child(2) .s-num { color: var(--silver); }
+.rank-row:nth-child(3) .s-num { color: var(--bronze); }
+.s-unit { font-size: 11px; color: var(--text-soft); }
 
-        @media(max-width:480px) {
-            .podium { gap:6px; }
-            .pod { padding: 14px 8px 14px; }
-            .pod-1 .pod-av { width:50px; height:50px; font-size:22px; }
-            .pod-1 .pod-num { font-size:40px; }
-            .rank-head,.rank-row { padding-left:14px; padding-right:14px; }
-            .rank-head { grid-template-columns: 42px 1fr auto; }
-            .rank-row { grid-template-columns: 42px 1fr auto; }
-            .list-av { width:34px; height:34px; font-size:13px; }
-        }
-    </style>
+/* Empty state */
+.empty {
+    text-align: center;
+    padding: 72px 20px;
+}
+.empty-ic { font-size: 48px; opacity: .2; margin-bottom: 18px; }
+.empty-t  { font-size: 16px; font-weight: 600; color: var(--text-mid); margin-bottom: 6px; }
+.empty-s  { font-size: 13px; color: var(--text-soft); }
+
+.footer {
+    text-align: center;
+    margin-top: 36px;
+    font-size: 11px;
+    color: var(--text-soft);
+    letter-spacing: 0.06em;
+}
+
+@media(max-width:480px) {
+    .podium  { gap: 8px; }
+    .pod     { padding: 16px 10px 16px; }
+    .pod-1 .pod-num { font-size: 38px; }
+    .rank-head, .rank-row { padding-left: 14px; padding-right: 14px; }
+}
+</style>
 </head>
 <body>
 
 <nav class="nav">
     <div class="nav-in">
         """ + logo_html + """
-        <button class="refresh-btn" onclick="location.reload()"><span class="spin">↻</span> 更新</button>
+        <button class="ghost-btn" onclick="location.reload()">
+            ↻ &nbsp;更新
+        </button>
     </div>
 </nav>
 
 <div class="hero">
     <div class="hero-in">
-        <div class="hero-title">STREAK<br><span class="hl">RANKING</span></div>
+        <div>
+            <div class="hero-eyebrow">Leaderboard</div>
+            <div class="hero-title">Streak<br><em>Ranking</em></div>
+        </div>
         <div class="hero-stat">
-            <div class="hero-stat-num">{{ ranking_data|length }}</div>
-            <div class="hero-stat-lbl">人が参加中</div>
+            <div class="hero-num">{{ ranking_data|length }}</div>
+            <div class="hero-lbl">参加者</div>
         </div>
     </div>
 </div>
@@ -1154,105 +1391,143 @@ def ranking():
 <div class="wrap">
 
 {% if ranking_data|length >= 3 %}
-<div class="podium">
-    <!-- 2位 -->
-    <div class="pod pod-2">
-        <div class="pod-av av-s">{{ ranking_data[1]['nickname'][0] }}</div>
-        <span class="pod-medal">🥈</span>
-        <div class="pod-place">2ND PLACE</div>
-        <div class="pod-name">{{ ranking_data[1]['nickname'] }}</div>
-        <div class="pod-num">{{ ranking_data[1]['streak_days'] }}</div>
-        <div class="pod-unit">日連続</div>
-        <div class="pod-lv">{{ ranking_data[1]['level'] }}</div>
-    </div>
-    <!-- 1位 -->
-    <div class="pod pod-1">
-        <div class="pod-av av-g">{{ ranking_data[0]['nickname'][0] }}</div>
-        <span class="pod-medal">🥇</span>
-        <div class="pod-place">1ST PLACE</div>
-        <div class="pod-name">{{ ranking_data[0]['nickname'] }}</div>
-        <div class="pod-num">{{ ranking_data[0]['streak_days'] }}</div>
-        <div class="pod-unit">日連続</div>
-        <div class="pod-lv">{{ ranking_data[0]['level'] }}</div>
-    </div>
-    <!-- 3位 -->
-    <div class="pod pod-3">
-        <div class="pod-av av-b">{{ ranking_data[2]['nickname'][0] }}</div>
-        <span class="pod-medal">🥉</span>
-        <div class="pod-place">3RD PLACE</div>
-        <div class="pod-name">{{ ranking_data[2]['nickname'] }}</div>
-        <div class="pod-num">{{ ranking_data[2]['streak_days'] }}</div>
-        <div class="pod-unit">日連続</div>
-        <div class="pod-lv">{{ ranking_data[2]['level'] }}</div>
+<div class="podium-section">
+    <div class="sec-lbl">Top 3</div>
+    <div class="podium">
+        <!-- 2位 -->
+        <div class="pod pod-2">
+            <div class="pod-av av-silver">{{ ranking_data[1]['nickname'][0] }}</div>
+            <div class="pod-rank">2nd Place</div>
+            <div class="pod-name">{{ ranking_data[1]['nickname'] }}</div>
+            <div class="pod-num">{{ ranking_data[1]['streak_days'] }}</div>
+            <div class="pod-unit">日連続</div>
+            <div class="pod-lv">{{ ranking_data[1]['level'] }}</div>
+        </div>
+        <!-- 1位 -->
+        <div class="pod pod-1">
+            <div class="pod-av av-gold">{{ ranking_data[0]['nickname'][0] }}</div>
+            <div class="pod-rank">1st Place</div>
+            <div class="pod-name">{{ ranking_data[0]['nickname'] }}</div>
+            <div class="pod-num">{{ ranking_data[0]['streak_days'] }}</div>
+            <div class="pod-unit">日連続</div>
+            <div class="pod-lv">{{ ranking_data[0]['level'] }}</div>
+        </div>
+        <!-- 3位 -->
+        <div class="pod pod-3">
+            <div class="pod-av av-bronze">{{ ranking_data[2]['nickname'][0] }}</div>
+            <div class="pod-rank">3rd Place</div>
+            <div class="pod-name">{{ ranking_data[2]['nickname'] }}</div>
+            <div class="pod-num">{{ ranking_data[2]['streak_days'] }}</div>
+            <div class="pod-unit">日連続</div>
+            <div class="pod-lv">{{ ranking_data[2]['level'] }}</div>
+        </div>
     </div>
 </div>
 {% endif %}
 
+<div class="sec-lbl">Full Ranking</div>
 <div class="rank-card">
     <div class="rank-head">
-        <span style="text-align:center">#</span>
-        <span style="padding-left:8px">ユーザー</span>
-        <span>連続記録</span>
+        <span style="text-align:center;">#</span>
+        <span style="padding-left:8px;">Player</span>
+        <span>Streak</span>
     </div>
+
     {% if ranking_data|length > 0 %}
     {% for user in ranking_data %}
     <div class="rank-row">
         <div class="pos">{{ loop.index }}</div>
         <div class="user-cell">
-            <div class="list-av {% if loop.index==1 %}av-g{% elif loop.index==2 %}av-s{% elif loop.index==3 %}av-b{% else %}av-n{% endif %}">{{ user['nickname'][0] }}</div>
+            <div class="list-av
+                {% if loop.index == 1 %}av-gold
+                {% elif loop.index == 2 %}av-silver
+                {% elif loop.index == 3 %}av-bronze
+                {% else %}av-def{% endif %}">
+                {{ user['nickname'][0] }}
+            </div>
             <div>
                 <div class="u-name">{{ user['nickname'] }}</div>
                 <div class="u-lv">{{ user['level'] }}</div>
             </div>
         </div>
-        <div class="badge"><span>🔥</span><span class="b-num">{{ user['streak_days'] }}</span><span class="b-unit">日</span></div>
+        <div class="streak-badge">
+            <span class="s-num">{{ user['streak_days'] }}</span>
+            <span class="s-unit">日</span>
+        </div>
     </div>
     {% endfor %}
     {% else %}
     <div class="empty">
         <div class="empty-ic">🏆</div>
         <div class="empty-t">まだランキングデータがありません</div>
-        <div class="empty-s">毎日「今すぐ」を送って記録をつけよう！</div>
+        <div class="empty-s">毎日「今すぐ」を送って記録をつけよう</div>
     </div>
     {% endif %}
 </div>
 
 <div class="footer">© なわ太コーチ — Jump Rope AI Coach</div>
-</div>
+
+</div><!-- /wrap -->
 </body>
 </html>
 """
     return render_template_string(html, ranking_data=ranking_data)
 
 
-
-
+# ==========================================
+# 設定ページ
+# ==========================================
 @app.route("/settings", methods=['GET', 'POST'])
 def settings():
-    """設定画面 - 明るいクリーンデザイン"""
+    """設定画面"""
     try:
         user_id = request.args.get('user_id')
-
-        # ロゴHTML（環境変数 LOGO_IMAGE_URL が設定されていれば画像、なければテキスト）
-        if LOGO_IMAGE_URL:
-            logo_html = f'<img src="{LOGO_IMAGE_URL}" alt="なわ太コーチ" style="height:30px;width:auto;object-fit:contain;display:block;">'
-        else:
-            logo_html = '<span style="font-size:15px;font-weight:700;color:#1e293b;">🪢 なわ太コーチ</span>'
+        logo_html = get_logo_html(height="30px")
 
         if not user_id:
             return f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>エラー — なわ太コーチ</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet">
-<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:"Noto Sans JP",sans-serif;background:#f1f5f9;min-height:100vh;display:flex;flex-direction:column}}
-.nav{{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 20px}}.nav-in{{max-width:520px;margin:0 auto;height:56px;display:flex;align-items:center}}
-.body{{flex:1;display:flex;align-items:center;justify-content:center;padding:20px}}
-.card{{background:#fff;border-radius:16px;padding:48px 32px;text-align:center;max-width:340px;width:100%;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.06)}}
-.ic{{font-size:48px;margin-bottom:16px}}h2{{font-size:18px;color:#1e293b;margin-bottom:10px;font-weight:700}}p{{font-size:14px;color:#64748b;line-height:1.7}}</style></head>
-<body>
+<style>
+{COMMON_THEME_CSS}
+.body-center {{
+    min-height:100vh;
+    display:flex; flex-direction:column;
+}}
+.center {{
+    flex:1;
+    display:flex; align-items:center; justify-content:center;
+    padding:40px 20px;
+}}
+.err-card {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-xl);
+    padding: 52px 36px;
+    text-align: center;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: var(--sh2);
+}}
+.err-ic {{ font-size: 44px; margin-bottom: 20px; opacity:.6; }}
+.err-title {{ font-family:'DM Serif Display',serif; font-size:22px; color:var(--text); margin-bottom:10px; }}
+.err-desc  {{ font-size:13px; color:var(--text-mid); line-height:1.7; }}
+</style>
+</head>
+<body class="body-center">
 <nav class="nav"><div class="nav-in">{logo_html}</div></nav>
-<div class="body"><div class="card"><div class="ic">⚠️</div><h2>アクセスエラー</h2><p>ユーザーIDが見つかりません。<br>LINEから再度アクセスしてください。</p></div></div>
-</body></html>""", 400
+<div class="center">
+<div class="err-card">
+<div class="err-ic">⚠️</div>
+<div class="err-title">アクセスエラー</div>
+<p class="err-desc">ユーザーIDが見つかりません。<br>LINEから再度アクセスしてください。</p>
+</div>
+</div>
+</body>
+</html>""", 400
 
         if request.method == 'POST':
             new_level = request.form.get('level')
@@ -1272,221 +1547,446 @@ def settings():
             ranking_url = f"{APP_PUBLIC_URL}/ranking"
 
             return f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>設定完了 — なわ太コーチ</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;700;900&display=swap" rel="stylesheet">
-<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:"Noto Sans JP",sans-serif;background:#f1f5f9;min-height:100vh;display:flex;flex-direction:column}}
-.nav{{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 20px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}}.nav-in{{max-width:520px;margin:0 auto;height:56px;display:flex;align-items:center}}
-.body{{flex:1;display:flex;align-items:center;justify-content:center;padding:32px 20px}}
-.card{{background:#fff;border-radius:20px;padding:48px 32px;text-align:center;max-width:380px;width:100%;box-shadow:0 1px 3px rgba(0,0,0,0.06),0 8px 32px rgba(0,0,0,0.08);animation:pop .45s cubic-bezier(.34,1.56,.64,1) both}}
-@keyframes pop{{from{{opacity:0;transform:scale(.85)}}to{{opacity:1;transform:scale(1)}}}}
-.check{{width:72px;height:72px;background:linear-gradient(135deg,#34d399,#10b981);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;font-size:34px;box-shadow:0 0 32px rgba(16,185,129,.25)}}
-h2{{font-size:22px;font-weight:700;color:#1e293b;margin-bottom:8px}}p{{font-size:14px;color:#64748b;line-height:1.7;margin-bottom:28px}}
-.btn{{display:inline-flex;align-items:center;gap:8px;padding:13px 28px;background:linear-gradient(135deg,#f97316,#fb923c);color:#fff;text-decoration:none;border-radius:100px;font-size:14px;font-weight:700;box-shadow:0 4px 16px rgba(249,115,22,.35);transition:.2s}}
-.btn:hover{{transform:translateY(-2px);box-shadow:0 6px 24px rgba(249,115,22,.45)}}
-.note{{margin-top:18px;font-size:12px;color:#94a3b8}}</style></head>
-<body>
+<style>
+{COMMON_THEME_CSS}
+.body-center {{ min-height:100vh; display:flex; flex-direction:column; }}
+.center {{ flex:1; display:flex; align-items:center; justify-content:center; padding:40px 20px; }}
+.done-card {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-xl);
+    padding: 52px 36px;
+    text-align: center;
+    max-width: 380px;
+    width: 100%;
+    box-shadow: var(--sh2);
+    animation: scaleIn .45s cubic-bezier(.34,1.56,.64,1) both;
+}}
+.check-circle {{
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: var(--green-lo);
+    border: 1.5px solid rgba(95,184,138,0.3);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 28px;
+    font-size: 30px;
+}}
+.done-title {{
+    font-family: 'DM Serif Display', serif;
+    font-size: 24px;
+    color: var(--text);
+    margin-bottom: 10px;
+}}
+.done-desc {{
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.8;
+    margin-bottom: 32px;
+}}
+.primary-btn {{
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 28px;
+    background: var(--accent);
+    color: var(--ink);
+    text-decoration: none;
+    border-radius: 100px;
+    font-size: 13px; font-weight: 700;
+    letter-spacing: 0.04em;
+    transition: all .2s;
+    box-shadow: 0 4px 20px rgba(200,169,126,0.3);
+}}
+.primary-btn:hover {{
+    background: var(--accent-hi);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 28px rgba(200,169,126,0.4);
+}}
+.done-note {{
+    margin-top: 20px;
+    font-size: 11px;
+    color: var(--text-soft);
+    letter-spacing: 0.04em;
+}}
+</style>
+</head>
+<body class="body-center">
 <nav class="nav"><div class="nav-in">{logo_html}</div></nav>
-<div class="body"><div class="card">
-<div class="check">✓</div>
-<h2>設定を保存しました！</h2>
-<p>「今すぐ」と送信すると<br>新しい設定で課題が届きます。</p>
-<a href="{ranking_url}" class="btn">🔥 ランキングを見る</a>
-<div class="note">LINEの画面に戻ってください</div>
-</div></div>
-</body></html>"""
+<div class="center">
+<div class="done-card">
+<div class="check-circle">✓</div>
+<div class="done-title">設定を保存しました</div>
+<p class="done-desc">「今すぐ」と送信すると<br>新しい設定で課題が届きます。</p>
+<a href="{ranking_url}" class="primary-btn">🏆 ランキングを見る</a>
+<div class="done-note">LINEの画面に戻ってください</div>
+</div>
+</div>
+</body>
+</html>"""
 
         current_settings = get_user_settings(user_id)
-        current_nickname = current_settings.get('nickname', '') or ''
-        current_level = current_settings['level']
-        current_personality = current_settings.get('coach_personality', '優しい')
+        current_nickname   = current_settings.get('nickname', '') or ''
+        current_level      = current_settings['level']
+        current_personality= current_settings.get('coach_personality', '優しい')
 
-        personality_emojis = {"熱血":"🔥","優しい":"😊","厳しい":"💪","フレンドリー":"✌️","冷静":"🧠"}
-        personality_descs = {"熱血":"情熱的に鼓舞する","優しい":"丁寧で穏やかに","厳しい":"ストイックに追い込む","フレンドリー":"タメ口で親しみやすく","冷静":"論理的・分析的に"}
+        personality_emojis = {
+            "熱血":"🔥","優しい":"🌿","厳しい":"⚡","フレンドリー":"☀️","冷静":"🔬"
+        }
+        personality_descs = {
+            "熱血":   "情熱的に鼓舞する",
+            "優しい": "丁寧で穏やかに",
+            "厳しい": "ストイックに追い込む",
+            "フレンドリー": "タメ口で親しみやすく",
+            "冷静":   "論理的・分析的に"
+        }
 
         ranking_url = f"{APP_PUBLIC_URL}/ranking"
         initial = current_nickname[0] if current_nickname else "？"
+        nick_len = len(current_nickname)
 
+        # レベルカード生成
         level_cards_html = ""
         for lname, linfo in USER_LEVELS.items():
             active = "active" if lname == current_level else ""
-            level_cards_html += f"""<div class="lv-card {active}" onclick="selLv('{lname}',this)">
-  <div class="lv-chk">✓</div>
-  <div class="lv-name">{lname}</div>
-  <div class="lv-desc">{linfo['description']}</div>
+            level_cards_html += f"""
+<div class="lv-card {active}" onclick="selLv('{lname}',this)">
+    <div class="lv-chk">✓</div>
+    <div class="lv-name">{lname}</div>
+    <div class="lv-desc">{linfo['description']}</div>
 </div>"""
 
+        # パーソナリティカード生成
         pers_cards_html = ""
         for pname in COACH_PERSONALITIES:
             active = "active" if pname == current_personality else ""
-            emoji = personality_emojis.get(pname, "😊")
-            desc = personality_descs.get(pname, "")
-            pers_cards_html += f"""<div class="p-card {active}" onclick="selP('{pname}',this)">
-  <div class="p-em">{emoji}</div>
-  <div class="p-info"><div class="p-name">{pname}</div><div class="p-desc">{desc}</div></div>
-  <div class="p-dot"></div>
+            emoji = personality_emojis.get(pname, "")
+            desc  = personality_descs.get(pname, "")
+            pers_cards_html += f"""
+<div class="p-card {active}" onclick="selP('{pname}',this)">
+    <div class="p-em">{emoji}</div>
+    <div class="p-info">
+        <div class="p-name">{pname}</div>
+        <div class="p-desc">{desc}</div>
+    </div>
+    <div class="p-radio"></div>
 </div>"""
 
         html = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>練習設定 — なわ太コーチ</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=Barlow+Condensed:wght@700;900&display=swap" rel="stylesheet">
 <style>
-:root{{--bg:#f1f5f9;--surface:#fff;--surf2:#f8fafc;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--accent:#f97316;--acc2:#fb923c;--r:14px;--sh:0 1px 3px rgba(0,0,0,0.06),0 4px 16px rgba(0,0,0,0.06)}}
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:"Noto Sans JP",sans-serif;background:var(--bg);color:var(--text);min-height:100vh}}
+{COMMON_THEME_CSS}
 
-/* ナビ */
-.nav{{background:var(--surface);border-bottom:1px solid var(--border);padding:0 20px;position:sticky;top:0;z-index:99;box-shadow:0 1px 3px rgba(0,0,0,0.05)}}
-.nav-in{{max-width:520px;margin:0 auto;height:56px;display:flex;align-items:center;justify-content:space-between}}
-.nav-link{{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--muted);text-decoration:none;padding:6px 14px;border:1px solid var(--border);border-radius:100px;transition:.2s}}
-.nav-link:hover{{color:var(--text);background:var(--surf2)}}
+/* ════════════════════════════════════
+   設定ページ専用スタイル
+════════════════════════════════════ */
 
-/* ラッパー */
-.wrap{{max-width:520px;margin:0 auto;padding:24px 20px 60px}}
+/* ── プロフィールカード ── */
+.profile-card {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 20px;
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 32px;
+    box-shadow: var(--sh);
+}}
+.av-circle {{
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-hi);
+    background: var(--blue-lo);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Serif Display', serif;
+    font-size: 22px;
+    color: var(--blue);
+    flex-shrink: 0;
+    transition: border-color .2s;
+}}
+.p-name-lg  {{ font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 3px; }}
+.p-meta     {{ font-size: 12px; color: var(--text-soft); }}
+.p-edit-hint{{ font-size: 11px; color: var(--accent); margin-top: 4px; opacity:.8; }}
 
-/* プロフィールカード */
-.profile-card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;display:flex;align-items:center;gap:16px;margin-bottom:24px;box-shadow:var(--sh)}}
-.av{{width:58px;height:58px;border-radius:50%;border:3px solid #e2e8f0;background:linear-gradient(135deg,#dbeafe,#3b82f6);display:flex;align-items:center;justify-content:center;font-family:"Barlow Condensed",sans-serif;font-size:24px;font-weight:900;color:#fff;flex-shrink:0;transition:border-color .2s}}
-.p-name-lg{{font-size:17px;font-weight:700;margin-bottom:2px}}
-.p-meta{{font-size:13px;color:var(--muted)}}
-.p-hint{{font-size:11px;color:var(--accent);margin-top:4px}}
+/* ── テキスト入力 ── */
+.inp-wrap {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    overflow: hidden;
+    box-shadow: var(--sh);
+    transition: border-color .2s, box-shadow .2s;
+}}
+.inp-wrap:focus-within {{
+    border-color: rgba(200,169,126,0.5);
+    box-shadow: 0 0 0 3px rgba(200,169,126,0.08);
+}}
+.inp-row {{
+    display: flex; align-items: center;
+    padding: 0 14px;
+}}
+.inp-ic {{ font-size: 15px; margin-right: 10px; flex-shrink: 0; opacity: .7; }}
+.inp-field {{
+    flex: 1;
+    background: transparent;
+    border: none; outline: none;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    padding: 13px 0;
+}}
+.inp-field::placeholder {{ color: var(--text-soft); font-weight: 400; }}
+.inp-cnt {{ font-size: 11px; color: var(--text-soft); flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }}
+.inp-hint {{
+    font-size: 11px; color: var(--text-soft);
+    padding: 0 14px 10px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    opacity: .8;
+}}
 
-/* セクション */
-.sec{{margin-bottom:20px}}
-.sec-lbl{{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px;padding-left:2px}}
+/* ── レベル選択グリッド ── */
+.lv-grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}}
+.lv-card {{
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 16px 14px;
+    cursor: pointer;
+    transition: all .2s;
+    box-shadow: var(--sh);
+    position: relative;
+}}
+.lv-card:hover {{
+    border-color: var(--border-hi);
+    transform: translateY(-2px);
+    background: var(--card-hov);
+}}
+.lv-card.active {{
+    border-color: rgba(200,169,126,0.5);
+    background: var(--accent-lo);
+}}
+.lv-chk {{
+    position: absolute; top: 10px; right: 10px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--text-soft);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px;
+    color: transparent;
+    transition: all .2s;
+}}
+.lv-card.active .lv-chk {{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--ink);
+}}
+.lv-name {{ font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }}
+.lv-desc {{ font-size: 11px; color: var(--text-soft); line-height: 1.5; }}
 
-/* テキスト入力 */
-.inp-box{{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);transition:border-color .2s,box-shadow .2s}}
-.inp-box:focus-within{{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.1)}}
-.inp-row{{display:flex;align-items:center;padding:0 14px}}
-.inp-ic{{font-size:16px;margin-right:10px;flex-shrink:0}}
-.inp-f{{flex:1;background:transparent;border:none;outline:none;font-family:"Noto Sans JP",sans-serif;font-size:15px;font-weight:500;color:var(--text);padding:14px 0}}
-.inp-f::placeholder{{color:var(--muted);font-weight:400}}
-.inp-cnt{{font-size:11px;color:var(--muted);flex-shrink:0}}
-.inp-hint{{font-size:11px;color:var(--muted);padding:0 14px 10px;opacity:.75}}
+/* ── パーソナリティリスト ── */
+.p-list {{ display: flex; flex-direction: column; gap: 8px; }}
+.p-card {{
+    display: flex; align-items: center; gap: 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 13px 16px;
+    cursor: pointer;
+    transition: all .2s;
+    box-shadow: var(--sh);
+}}
+.p-card:hover {{
+    border-color: var(--border-hi);
+    background: var(--card-hov);
+}}
+.p-card.active {{
+    border-color: rgba(200,169,126,0.5);
+    background: var(--accent-lo);
+}}
+.p-em   {{ font-size: 20px; width: 28px; text-align: center; flex-shrink: 0; }}
+.p-info {{ flex: 1; min-width: 0; }}
+.p-name {{ font-size: 14px; font-weight: 600; color: var(--text); }}
+.p-desc {{ font-size: 11px; color: var(--text-soft); margin-top: 2px; }}
+.p-radio {{
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--text-soft);
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .2s;
+}}
+.p-card.active .p-radio {{
+    border-color: var(--accent);
+    background: var(--accent);
+}}
+.p-card.active .p-radio::after {{
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--ink);
+    border-radius: 50%;
+}}
 
-/* レベルカード */
-.lv-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}
-.lv-card{{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:14px 12px;cursor:pointer;transition:all .2s;box-shadow:var(--sh);position:relative}}
-.lv-card:hover{{border-color:rgba(59,130,246,.4);transform:translateY(-2px);box-shadow:0 6px 24px rgba(0,0,0,0.09)}}
-.lv-card.active{{border-color:var(--accent);background:#fff7ed;box-shadow:0 0 0 1px rgba(249,115,22,.15),0 4px 16px rgba(249,115,22,.1)}}
-.lv-chk{{position:absolute;top:10px;right:10px;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--muted);display:flex;align-items:center;justify-content:center;font-size:10px;color:transparent;transition:.2s}}
-.lv-card.active .lv-chk{{background:var(--accent);border-color:var(--accent);color:#fff}}
-.lv-name{{font-size:15px;font-weight:700;margin-bottom:3px}}
-.lv-desc{{font-size:11px;color:var(--muted);line-height:1.5}}
+/* ── 保存ボタン ── */
+.save-btn {{
+    width: 100%;
+    padding: 15px;
+    background: var(--accent);
+    color: var(--ink);
+    border: none;
+    border-radius: var(--r);
+    font-family: 'Noto Sans JP', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all .25s;
+    box-shadow: 0 4px 20px rgba(200,169,126,0.25);
+    margin-top: 8px;
+}}
+.save-btn:hover {{
+    background: var(--accent-hi);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 28px rgba(200,169,126,0.35);
+}}
+.save-btn:active {{ transform: translateY(0); }}
 
-/* パーソナリティ */
-.p-list{{display:flex;flex-direction:column;gap:8px}}
-.p-card{{display:flex;align-items:center;gap:12px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:12px 14px;cursor:pointer;transition:all .2s;box-shadow:var(--sh)}}
-.p-card:hover{{border-color:rgba(59,130,246,.4);transform:translateX(3px)}}
-.p-card.active{{border-color:var(--accent);background:#fff7ed}}
-.p-em{{font-size:22px;width:32px;text-align:center;flex-shrink:0}}
-.p-info{{flex:1}}
-.p-name{{font-size:14px;font-weight:700}}
-.p-desc{{font-size:11px;color:var(--muted);margin-top:2px}}
-.p-dot{{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--muted);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.2s}}
-.p-card.active .p-dot{{border-color:var(--accent);background:var(--accent)}}
-.p-card.active .p-dot::after{{content:"";width:6px;height:6px;background:#fff;border-radius:50%}}
+/* ── ランキングバナー ── */
+.rank-banner {{
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 18px 20px;
+    text-decoration: none;
+    box-shadow: var(--sh);
+    margin-top: 14px;
+    transition: all .2s;
+}}
+.rank-banner:hover {{
+    border-color: rgba(200,169,126,0.35);
+    background: var(--card-hov);
+    transform: translateY(-2px);
+}}
+.rb-l {{ display: flex; align-items: center; gap: 14px; }}
+.rb-ic {{ font-size: 26px; }}
+.rb-title {{ font-size: 14px; font-weight: 600; color: var(--text); }}
+.rb-sub   {{ font-size: 11px; color: var(--text-soft); margin-top: 2px; }}
+.rb-arr   {{ font-size: 18px; color: var(--text-soft); }}
 
-/* 保存ボタン */
-.save-btn{{width:100%;padding:16px;background:linear-gradient(135deg,var(--accent),var(--acc2));color:#fff;border:none;border-radius:var(--r);font-family:"Noto Sans JP",sans-serif;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(249,115,22,.35);transition:.25s;margin-top:8px}}
-.save-btn:hover{{transform:translateY(-2px);box-shadow:0 6px 24px rgba(249,115,22,.45)}}
-.save-btn:active{{transform:translateY(0)}}
-
-/* ランキングバナー */
-.rank-banner{{display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--r);padding:16px;text-decoration:none;box-shadow:var(--sh);margin-top:12px;transition:.2s}}
-.rank-banner:hover{{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 6px 24px rgba(249,115,22,.1)}}
-.rb-l{{display:flex;align-items:center;gap:12px}}
-.rb-ic{{font-size:28px}}
-.rb-t{{font-size:14px;font-weight:700;color:var(--text)}}
-.rb-s{{font-size:12px;color:var(--muted);margin-top:2px}}
-.rb-arr{{font-size:20px;color:var(--muted)}}
-.divider{{height:1px;background:var(--border);margin:20px 0}}
-@media(max-width:400px){{.lv-grid{{grid-template-columns:1fr}}}}
+@media(max-width:400px) {{
+    .lv-grid {{ grid-template-columns: 1fr; }}
+}}
 </style>
 </head>
 <body>
 
 <nav class="nav">
-  <div class="nav-in">
-    {logo_html}
-    <a href="{ranking_url}" class="nav-link">🔥 ランキング</a>
-  </div>
+    <div class="nav-in">
+        {logo_html}
+        <a href="{ranking_url}" class="nav-link">🏆 ランキング</a>
+    </div>
 </nav>
 
 <div class="wrap">
 
 <div class="profile-card">
-  <div class="av" id="avCircle">{initial}</div>
-  <div>
-    <div class="p-name-lg" id="heroName">{current_nickname or '名前を設定しよう'}</div>
-    <div class="p-meta">{current_level} ・ {current_personality}コーチ</div>
-    <div class="p-hint">✏️ 設定を編集中</div>
-  </div>
+    <div class="av-circle" id="avCircle">{initial}</div>
+    <div>
+        <div class="p-name-lg" id="heroName">{current_nickname or '名前を設定しよう'}</div>
+        <div class="p-meta">{current_level} · {current_personality}コーチ</div>
+        <div class="p-edit-hint">設定を編集中</div>
+    </div>
 </div>
 
 <form method="POST" id="sf">
-  <input type="hidden" name="level" id="lvInp" value="{current_level}">
-  <input type="hidden" name="coach_personality" id="pInp" value="{current_personality}">
+    <input type="hidden" name="level" id="lvInp" value="{current_level}">
+    <input type="hidden" name="coach_personality" id="pInp" value="{current_personality}">
 
-  <div class="sec">
-    <div class="sec-lbl">ニックネーム</div>
-    <div class="inp-box">
-      <div class="inp-row">
-        <span class="inp-ic">✏️</span>
-        <input type="text" name="nickname" class="inp-f" value="{current_nickname}" maxlength="10" placeholder="例：ジャンプ太郎" id="nickInp" oninput="onNick(this)">
-        <span class="inp-cnt" id="cnt">{len(current_nickname)}/10</span>
-      </div>
-      <div class="inp-hint">ランキングに表示されます（10文字まで）</div>
+    <!-- ── ニックネーム ── -->
+    <div style="margin-bottom:28px;">
+        <div class="sec-lbl">ニックネーム</div>
+        <div class="inp-wrap">
+            <div class="inp-row">
+                <span class="inp-ic">✏️</span>
+                <input
+                    type="text"
+                    name="nickname"
+                    class="inp-field"
+                    value="{current_nickname}"
+                    maxlength="10"
+                    placeholder="例：ジャンプ太郎"
+                    id="nickInp"
+                    oninput="onNick(this)"
+                >
+                <span class="inp-cnt" id="cnt">{nick_len}/10</span>
+            </div>
+            <div class="inp-hint">ランキングに表示されます（10文字まで）</div>
+        </div>
     </div>
-  </div>
 
-  <div class="divider"></div>
+    <div class="divider"></div>
 
-  <div class="sec">
-    <div class="sec-lbl">🎯 練習レベル</div>
-    <div class="lv-grid">{level_cards_html}</div>
-  </div>
+    <!-- ── レベル ── -->
+    <div style="margin-bottom:28px;">
+        <div class="sec-lbl">練習レベル</div>
+        <div class="lv-grid">{level_cards_html}</div>
+    </div>
 
-  <div class="divider"></div>
+    <div class="divider"></div>
 
-  <div class="sec">
-    <div class="sec-lbl">😊 コーチの性格</div>
-    <div class="p-list">{pers_cards_html}</div>
-  </div>
+    <!-- ── コーチ性格 ── -->
+    <div style="margin-bottom:28px;">
+        <div class="sec-lbl">コーチの性格</div>
+        <div class="p-list">{pers_cards_html}</div>
+    </div>
 
-  <button type="submit" class="save-btn">💾 設定を保存する</button>
+    <button type="submit" class="save-btn">設定を保存する</button>
 </form>
 
 <a href="{ranking_url}" class="rank-banner">
-  <div class="rb-l"><div class="rb-ic">🏆</div><div><div class="rb-t">連続記録ランキング</div><div class="rb-s">みんなの記録をチェック！</div></div></div>
-  <div class="rb-arr">›</div>
+    <div class="rb-l">
+        <div class="rb-ic">🏆</div>
+        <div>
+            <div class="rb-title">連続記録ランキング</div>
+            <div class="rb-sub">みんなの記録をチェック</div>
+        </div>
+    </div>
+    <div class="rb-arr">›</div>
 </a>
-</div>
+
+</div><!-- /wrap -->
 
 <script>
-function onNick(el){{
-  document.getElementById("cnt").textContent=el.value.length+"/10";
-  document.getElementById("heroName").textContent=el.value||"名前を設定しよう";
-  document.getElementById("avCircle").textContent=el.value?el.value[0]:"？";
+function onNick(el) {{
+    document.getElementById('cnt').textContent = el.value.length + '/10';
+    document.getElementById('heroName').textContent = el.value || '名前を設定しよう';
+    document.getElementById('avCircle').textContent = el.value ? el.value[0] : '？';
 }}
-function selLv(name,el){{
-  document.querySelectorAll(".lv-card").forEach(c=>c.classList.remove("active"));
-  el.classList.add("active");
-  document.getElementById("lvInp").value=name;
+function selLv(name, el) {{
+    document.querySelectorAll('.lv-card').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('lvInp').value = name;
 }}
-function selP(name,el){{
-  document.querySelectorAll(".p-card").forEach(c=>c.classList.remove("active"));
-  el.classList.add("active");
-  document.getElementById("pInp").value=name;
+function selP(name, el) {{
+    document.querySelectorAll('.p-card').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('pInp').value = name;
 }}
 </script>
 </body>
 </html>"""
+
         return render_template_string(html)
 
     except Exception as e:
@@ -1496,6 +1996,9 @@ function selP(name,el){{
         return f"Internal Server Error: {str(e)}", 500
 
 
+# ==========================================
+# LINE Webhook
+# ==========================================
 @app.route("/callback", methods=['POST'])
 def callback():
     """LINE Webhook"""
@@ -1582,7 +2085,6 @@ def handle_message(event):
         if text == "今すぐ":
             today = datetime.now(JST).strftime("%Y-%m-%d")
 
-            # 今日の即時配信回数をチェック
             resp = supabase.table("users").select(
                 "immediate_request_count, last_immediate_request_date"
             ).eq("user_id", user_id).execute()
@@ -1594,7 +2096,6 @@ def handle_message(event):
                 immediate_count = resp.data[0].get("immediate_request_count") or 0
                 last_request_date = resp.data[0].get("last_immediate_request_date")
 
-            # 日付が変わっていたらカウントをリセット
             if last_request_date != today:
                 immediate_count = 0
                 supabase.table("users").update({
@@ -1602,7 +2103,6 @@ def handle_message(event):
                     "last_immediate_request_date": today,
                 }).eq("user_id", user_id).execute()
 
-            # 1日3回までの制限チェック
             if immediate_count >= 3:
                 reply_text = (
                     "⚠️ 本日の「今すぐ」は3回まで利用できます。\n\n"
@@ -1614,7 +2114,6 @@ def handle_message(event):
                 print(f"🚫 [{timestamp}] Immediate delivery limit reached for {user_id[:8]}...")
                 return
 
-            # カウントを増やす
             supabase.table("users").update({
                 "immediate_request_count": immediate_count + 1,
                 "last_immediate_request_date": today,
@@ -1622,14 +2121,12 @@ def handle_message(event):
 
             print(f"🚀 [{timestamp}] Immediate delivery requested by {user_id[:8]}... ({immediate_count + 1}/3 today)")
 
-            # 課題を生成してreplyで返信
             challenge_content = create_challenge_message(user_id, settings['level'])
 
             full_message = challenge_content + "\n\n💬 フィードバック\n「できた」「難しかった」と送ると、次回の課題が調整されます！"
 
             messages = [TextSendMessage(text=full_message)]
 
-            # 応援メッセージ（配信3回以降、1回だけ）
             if settings['delivery_count'] >= 3 and settings['support_shown'] == 0:
                 support_message = (
                     "いつも練習お疲れ様です！🙏\n\n"
@@ -1724,7 +2221,6 @@ print("\n" + "=" * 70)
 print("🚀 Initializing Jump Rope AI Coach Bot (Supabase Edition)")
 print("=" * 70 + "\n")
 
-# Supabase接続確認
 try:
     test_resp = supabase.table("users").select("user_id").limit(1).execute()
     print("✅ Supabase connection OK")
