@@ -1,4 +1,5 @@
 import os
+import base64
 from datetime import datetime
 from pytz import timezone
 from flask import Flask, request, abort, render_template_string, jsonify
@@ -24,7 +25,19 @@ BOOTH_SUPPORT_URL = "https://visai.booth.pm/items/7763380"
 LINE_BOT_ID = os.environ.get("LINE_BOT_ID", "@698rtcqz")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-LOGO_IMAGE_URL = os.environ.get("LOGO_IMAGE_URL", "logo.png")
+
+# ==========================================
+# ロゴ画像を起動時にBase64へ変換して保持
+# logo.png を main.py と同じディレクトリに置くだけでOK
+# ==========================================
+_LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+LOGO_BASE64 = ""
+if os.path.exists(_LOGO_PATH):
+    with open(_LOGO_PATH, "rb") as _f:
+        LOGO_BASE64 = base64.b64encode(_f.read()).decode("utf-8")
+    print(f"✅ Logo loaded: {_LOGO_PATH}")
+else:
+    print(f"⚠️  Logo not found at {_LOGO_PATH} — テキストロゴを使用します")
 
 # ★ オリジナルスタンプの画像URL
 WELCOME_STAMP_URL = os.environ.get("WELCOME_STAMP_URL", "https://example.com/welcome_stamp.png")
@@ -861,15 +874,13 @@ def get_ranking_data():
 
 # ==========================================
 # ロゴHTMLを生成するヘルパー関数
+# logo.png を main.py と同じ階層に置けば自動でBase64埋め込みになる
 # ==========================================
 def get_logo_html(height="32px"):
-    """
-    LOGO_IMAGE_URL が設定されていれば <img> タグを、
-    未設定またはデフォルト値の場合はテキストロゴを返す。
-    """
-    if LOGO_IMAGE_URL and LOGO_IMAGE_URL.strip():
+    """logo.pngが存在すればBase64 data URIで<img>を返す。なければテキストロゴ。"""
+    if LOGO_BASE64:
         return (
-            f'<img src="{LOGO_IMAGE_URL}" alt="なわ太コーチ" '
+            f'<img src="data:image/png;base64,{LOGO_BASE64}" alt="なわ太コーチ" '
             f'style="height:{height};width:auto;object-fit:contain;display:block;vertical-align:middle;">'
         )
     return '<span class="logo-text">🪢 なわ太コーチ</span>'
