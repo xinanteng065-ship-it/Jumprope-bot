@@ -708,7 +708,7 @@ TS系:
         # 10日ごとの特別課題（採点アプリ）
         if is_special_day and streak_days <= 100:
             special_challenges = {
-                10: {
+                2: {
                     "duration": "15秒",
                     "target": "3点超え",
                     "message": "まずは15秒のフリースタイルを作ってみよう！"
